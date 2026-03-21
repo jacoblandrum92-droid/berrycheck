@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>BerryCheck — Capture</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #0a0d06;
+    color: #d4e4b8;
+    font-family: 'Helvetica Neue', sans-serif;
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    user-select: none;
+  }
+
+  .topbar {
+    padding: 14px 20px 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: #0a0d06;
+    z-index: 10;
+    flex-shrink: 0;
+  }
+
+  .logo {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #7cb842;
+  }
+
+  .status-pill {
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 20px;
+    background: #1a2210;
+    border: 1px solid #2a3318;
+    color: #526638;
+    letter-spacing: 0.05em;
+  }
+
+  .status-pill.ready { border-color: #4a7020; color: #7cb842; }
+  .status-pill.sending { border-color: #7a5205; color: #d4930a; background: #1a1408; }
+  .status-pill.done { border-color: #4a7020; color: #7cb842; background: #0f1a06; }
+  .status-pill.error { border-color: #6e1f17; color: #ff6b5b; background: #1a0805; }
+
+  .viewfinder-wrap {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+  }
+
+  video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  canvas { display: none; }
+
+  /* Zone overlay guides */
+  .zone-overlay {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+
+  .zone-overlay.visible { opacity: 1; }
+
+  .zone-box {
+    position: absolute;
+    border: 1.5px dashed rgba(124,184,66,0.5);
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .zone-label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(124,184,66,0.8);
+    background: rgba(0,0,0,0.5);
+    padding: 2px 6px;
+    border-radius: 3px;
+  }
+
+  .zone-softs    { bottom: 4%; right: 4%; width: 28%; height: 22%; border-color: rgba(192,57,43,0.6); }
+  .zone-softs .zone-label { color: rgba(255,107,91,0.9); }
+  .zone-reds     { bottom: 4%; left: 4%; width: 28%; height: 22%; border-color: rgba(212,147,10,0.6); }
+  .zone-reds .zone-label { color: rgba(212,147,10,0.9); }
+  .zone-anthr    { top: 4%; right: 4%; width: 28%; height: 22%; border-color: rgba(167,139,250,0.6); }
+  .zone-anthr .zone-label { color: rgba(167,139,250,0.9); }
+  .zone-center   { top: 50%; left: 50%; transform: translate(-50%,-50%); width: 40%; height: 40%; border-color: rgba(124,184,66,0.3); }
+
+  .freeze-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(124,184,66,0.08);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s;
+  }
+
+  .freeze-overlay.flash { opacity: 1; }
+
+  /* Result card */
+  .result-card {
+    position: absolute;
+    inset: 0;
+    background: rgba(10,13,6,0.92);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s;
+    padding: 30px;
+  }
+
+  .result-card.visible {
+    opacity: 1;
+    pointer-events: all;
+  }
+
+  .result-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    width: 100%;
+  }
+
+  .result-cell {
+    background: #141a0a;
+    border: 1px solid #2a3318;
+    border-radius: 8px;
+    padding: 14px;
+    text-align: center;
+  }
+
+  .result-cell-label {
+    font-size: 9px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #526638;
+    margin-bottom: 6px;
+  }
+
+  .result-cell-value {
+    font-size: 32px;
+    font-weight: 700;
+    color: #d4e4b8;
+    line-height: 1;
+  }
+
+  .result-cell.softs .result-cell-value { color: #ff6b5b; }
+  .result-cell.reds .result-cell-value { color: #d4930a; }
+  .result-cell.anthr .result-cell-value { color: #a78bfa; }
+
+  .result-note {
+    font-size: 12px;
+    color: #526638;
+    text-align: center;
+    font-style: italic;
+    padding: 0 10px;
+  }
+
+  .result-sent {
+    font-size: 11px;
+    color: #7cb842;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  /* Bottom bar */
+  .bottombar {
+    padding: 16px 24px 28px;
+    background: #0a0d06;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+    flex-shrink: 0;
+  }
+
+  .guide-btn {
+    width: 44px; height: 44px;
+    border-radius: 50%;
+    border: 1.5px solid #2a3318;
+    background: #141a0a;
+    color: #526638;
+    font-size: 18px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    transition: all 0.15s;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .guide-btn.active { border-color: #4a7020; color: #7cb842; }
+
+  .shutter {
+    width: 72px; height: 72px;
+    border-radius: 50%;
+    border: 3px solid #7cb842;
+    background: transparent;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    transition: all 0.12s;
+    -webkit-tap-highlight-color: transparent;
+    position: relative;
+  }
+
+  .shutter:active { transform: scale(0.92); }
+
+  .shutter-inner {
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    background: #7cb842;
+    transition: all 0.12s;
+  }
+
+  .shutter.sending .shutter-inner {
+    background: #d4930a;
+    animation: spin-inner 1s linear infinite;
+  }
+
+  @keyframes spin-inner {
+    to { transform: rotate(360deg); border-radius: 40% 60% 60% 40%; }
+  }
+
+  .retake-btn {
+    width: 44px; height: 44px;
+    border-radius: 50%;
+    border: 1.5px solid #2a3318;
+    background: #141a0a;
+    color: #526638;
+    font-size: 16px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    transition: all 0.15s;
+    -webkit-tap-highlight-color: transparent;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .retake-btn.visible { opacity: 1; pointer-events: all; color: #8aa464; border-color: #3a4a22; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="logo">BerryCheck</div>
+  <div class="status-pill" id="status">Starting camera...</div>
+</div>
+
+<div class="viewfinder-wrap">
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="canvas"></canvas>
+
+  <div class="zone-overlay" id="zones">
+    <div class="zone-box zone-center"><span class="zone-label">Main field</span></div>
+    <div class="zone-box zone-softs"><span class="zone-label">Softs →</span></div>
+    <div class="zone-box zone-reds"><span class="zone-label">← Reds</span></div>
+    <div class="zone-box zone-anthr"><span class="zone-label">Anthr →</span></div>
+  </div>
+
+  <div class="freeze-overlay" id="flash"></div>
+
+  <div class="result-card" id="result-card">
+    <div class="result-sent" id="result-sent">✓ Sent to dashboard</div>
+    <div class="result-grid" id="result-grid"></div>
+    <div class="result-note" id="result-note"></div>
+  </div>
+</div>
+
+<div class="bottombar">
+  <button class="guide-btn" id="guide-btn" onclick="toggleGuides()" title="Toggle zone guides">⊞</button>
+  <button class="shutter" id="shutter" onclick="capture()">
+    <div class="shutter-inner"></div>
+  </button>
+  <button class="retake-btn" id="retake-btn" onclick="retake()">↩</button>
+</div>
+
+<script>
+let guidesOn = false;
+let stream = null;
+
+async function startCamera() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
+      audio: false
+    });
+    document.getElementById('video').srcObject = stream;
+    setStatus('ready', 'Ready');
+  } catch (e) {
+    setStatus('error', 'Camera error');
+    console.error(e);
+  }
+}
+
+function setStatus(cls, text) {
+  const el = document.getElementById('status');
+  el.className = 'status-pill ' + cls;
+  el.textContent = text;
+}
+
+function toggleGuides() {
+  guidesOn = !guidesOn;
+  document.getElementById('zones').classList.toggle('visible', guidesOn);
+  document.getElementById('guide-btn').classList.toggle('active', guidesOn);
+}
+
+async function capture() {
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('canvas');
+  const shutter = document.getElementById('shutter');
+
+  if (shutter.classList.contains('sending')) return;
+
+  // Flash
+  const flash = document.getElementById('flash');
+  flash.classList.add('flash');
+  setTimeout(() => flash.classList.remove('flash'), 150);
+
+  // Draw frame to canvas
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext('2d').drawImage(video, 0, 0);
+
+  const imageData = canvas.toDataURL('image/jpeg', 0.92);
+
+  shutter.classList.add('sending');
+  setStatus('sending', 'Analyzing...');
+
+  try {
+    const res = await fetch('/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: imageData })
+    });
+
+    const data = await res.json();
+
+    if (data.error) {
+      setStatus('error', 'Error — retake');
+      shutter.classList.remove('sending');
+      return;
+    }
+
+    showResult(data);
+    setStatus('done', 'Sent ✓');
+    shutter.classList.remove('sending');
+    document.getElementById('retake-btn').classList.add('visible');
+
+  } catch (e) {
+    setStatus('error', 'Network error');
+    shutter.classList.remove('sending');
+  }
+}
+
+function showResult(data) {
+  const grid = document.getElementById('result-grid');
+  grid.innerHTML = `
+    <div class="result-cell">
+      <div class="result-cell-label">Total berries</div>
+      <div class="result-cell-value">${data.total || 0}</div>
+    </div>
+    <div class="result-cell softs">
+      <div class="result-cell-label">Softs</div>
+      <div class="result-cell-value">${data.softs || 0}</div>
+    </div>
+    <div class="result-cell reds">
+      <div class="result-cell-label">Red / unripe</div>
+      <div class="result-cell-value">${data.reds || 0}</div>
+    </div>
+    <div class="result-cell anthr">
+      <div class="result-cell-label">Anthracnose</div>
+      <div class="result-cell-value">${data.anthracnose || 0}</div>
+    </div>`;
+
+  if (data.notes) {
+    document.getElementById('result-note').textContent = data.notes;
+  }
+
+  document.getElementById('result-card').classList.add('visible');
+}
+
+function retake() {
+  document.getElementById('result-card').classList.remove('visible');
+  document.getElementById('retake-btn').classList.remove('visible');
+  setStatus('ready', 'Ready');
+}
+
+startCamera();
+</script>
+</body>
+</html>

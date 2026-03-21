@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BerryCheck QC</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0f1209;
+    --bg2: #171c0e;
+    --bg3: #1e2613;
+    --border: #2a3318;
+    --border2: #3a4a22;
+    --green: #7cb842;
+    --green-dim: #4a7020;
+    --amber: #d4930a;
+    --amber-dim: #7a5205;
+    --red: #c0392b;
+    --red-dim: #6e1f17;
+    --purple: #a78bfa;
+    --text: #d4e4b8;
+    --text2: #8aa464;
+    --text3: #526638;
+    --mono: 'IBM Plex Mono', monospace;
+    --sans: 'IBM Plex Sans', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px; min-height: 100vh; }
+
+  .header {
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .logo { font-family: var(--mono); font-size: 15px; font-weight: 600; color: var(--green); letter-spacing: 0.08em; text-transform: uppercase; }
+  .logo span { color: var(--text3); font-weight: 400; }
+
+  .header-right { display: flex; align-items: center; gap: 16px; }
+
+  .camera-link {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text3);
+    background: var(--bg3);
+    border: 1px solid var(--border2);
+    padding: 4px 12px;
+    border-radius: 3px;
+    text-decoration: none;
+    letter-spacing: 0.06em;
+    transition: all 0.15s;
+  }
+  .camera-link:hover { color: var(--green); border-color: var(--green-dim); }
+
+  .live-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--text3);
+    transition: background 0.3s;
+    flex-shrink: 0;
+  }
+  .live-dot.active { background: var(--green); box-shadow: 0 0 6px var(--green); animation: glow 1.5s ease-in-out infinite; }
+  @keyframes glow { 0%,100%{opacity:1} 50%{opacity:0.5} }
+
+  .live-label { font-family: var(--mono); font-size: 10px; color: var(--text3); letter-spacing: 0.08em; }
+
+  .clock { font-family: var(--mono); font-size: 11px; color: var(--text3); }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    min-height: calc(100vh - 49px);
+  }
+
+  .sidebar {
+    background: var(--bg2);
+    border-right: 1px solid var(--border);
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    overflow-y: auto;
+  }
+
+  .section-label { font-family: var(--mono); font-size: 10px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text3); margin-bottom: 8px; }
+
+  .form-group { margin-bottom: 10px; }
+  .form-label { font-family: var(--mono); font-size: 10px; color: var(--text3); letter-spacing: 0.08em; text-transform: uppercase; display: block; margin-bottom: 4px; }
+
+  input, select {
+    width: 100%;
+    background: var(--bg3);
+    border: 1px solid var(--border2);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 13px;
+    padding: 7px 10px;
+    border-radius: 3px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  input:focus, select:focus { border-color: var(--green-dim); }
+  select option { background: var(--bg3); }
+
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .divider { border: none; border-top: 1px solid var(--border); }
+
+  /* Camera counts panel */
+  .camera-panel {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 12px;
+    position: relative;
+    transition: border-color 0.3s;
+  }
+  .camera-panel.fresh { border-color: var(--green-dim); }
+
+  .camera-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 10px;
+  }
+
+  .camera-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text3); }
+  .camera-dot.live { background: var(--green); animation: glow 2s infinite; }
+
+  .camera-source { font-family: var(--mono); font-size: 9px; color: var(--text3); letter-spacing: 0.08em; text-transform: uppercase; }
+
+  .count-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+
+  .count-field {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 8px 10px;
+    position: relative;
+  }
+
+  .count-field-label { font-family: var(--mono); font-size: 9px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 3px; }
+
+  .count-field input { background: transparent; border: none; padding: 0; font-size: 20px; font-weight: 600; color: var(--text); width: 100%; }
+  .count-field input.autofilled { color: var(--green); transition: color 1s; }
+
+  .uv-row {
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 3px; padding: 7px 10px; margin-top: 6px;
+  }
+  .uv-label { font-family: var(--mono); font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.06em; }
+
+  .toggle-group { display: flex; gap: 3px; }
+  .toggle-btn { font-family: var(--mono); font-size: 10px; padding: 3px 9px; border-radius: 2px; border: 1px solid var(--border2); background: transparent; color: var(--text3); cursor: pointer; transition: all 0.15s; letter-spacing: 0.04em; }
+  .toggle-btn.active-neg { background: var(--green-dim); border-color: var(--green); color: var(--green); }
+  .toggle-btn.active-pos { background: var(--red-dim); border-color: var(--red); color: #ff6b5b; }
+
+  .submit-btn {
+    width: 100%; background: var(--green-dim); border: 1px solid var(--green);
+    color: var(--green); font-family: var(--mono); font-size: 12px; font-weight: 600;
+    letter-spacing: 0.1em; text-transform: uppercase; padding: 12px;
+    border-radius: 3px; cursor: pointer; transition: all 0.15s;
+  }
+  .submit-btn:hover { background: var(--green); color: var(--bg); }
+
+  .main { padding: 18px 22px; display: flex; flex-direction: column; gap: 18px; overflow-y: auto; }
+
+  .status-bar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+
+  .stat-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 4px; padding: 12px 14px; position: relative; overflow: hidden; }
+  .stat-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; }
+  .stat-card.ok::before { background: var(--green); }
+  .stat-card.warn::before { background: var(--amber); }
+  .stat-card.fail::before { background: var(--red); }
+  .stat-card.neutral::before { background: var(--border2); }
+
+  .stat-label { font-family: var(--mono); font-size: 9px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 5px; }
+  .stat-value { font-family: var(--mono); font-size: 26px; font-weight: 600; line-height: 1; margin-bottom: 3px; }
+  .stat-card.ok .stat-value { color: var(--green); }
+  .stat-card.warn .stat-value { color: var(--amber); }
+  .stat-card.fail .stat-value { color: #ff6b5b; }
+  .stat-card.neutral .stat-value { color: var(--text); }
+  .stat-sub { font-family: var(--mono); font-size: 10px; color: var(--text3); }
+
+  .thresholds-panel { background: var(--bg2); border: 1px solid var(--border); border-radius: 4px; padding: 14px 16px; }
+
+  .threshold-row { display: grid; grid-template-columns: 130px 1fr 70px 80px; align-items: center; gap: 14px; padding: 9px 0; border-bottom: 1px solid var(--border); }
+  .threshold-row:last-child { border-bottom: none; }
+  .threshold-name { font-family: var(--mono); font-size: 11px; color: var(--text2); text-transform: uppercase; letter-spacing: 0.05em; }
+
+  .bar-track { height: 5px; background: var(--bg3); border-radius: 3px; position: relative; }
+  .bar-fill { height: 100%; border-radius: 3px; transition: width 0.5s ease; }
+  .bar-marker { position: absolute; top: -4px; width: 2px; height: 13px; background: var(--border2); border-radius: 1px; }
+
+  .threshold-pct { font-family: var(--mono); font-size: 13px; font-weight: 600; text-align: right; }
+  .threshold-headroom { font-family: var(--mono); font-size: 10px; text-align: right; }
+  .headroom-ok { color: var(--green); }
+  .headroom-warn { color: var(--amber); }
+  .headroom-fail { color: #ff6b5b; }
+
+  .history-panel { background: var(--bg2); border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
+  .history-header { padding: 10px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+
+  table { width: 100%; border-collapse: collapse; }
+  thead th { font-family: var(--mono); font-size: 9px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.08em; text-align: left; padding: 7px 16px; border-bottom: 1px solid var(--border); font-weight: 500; }
+  tbody tr { border-bottom: 1px solid var(--border); transition: background 0.1s; }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background: var(--bg3); }
+  tbody td { font-family: var(--mono); font-size: 11px; color: var(--text2); padding: 9px 16px; }
+
+  .grade-badge { display: inline-block; font-family: var(--mono); font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 2px; letter-spacing: 0.04em; }
+  .grade-1 { background: rgba(124,184,66,0.12); color: var(--green); border: 1px solid var(--green-dim); }
+  .grade-2 { background: rgba(212,147,10,0.12); color: var(--amber); border: 1px solid var(--amber-dim); }
+  .grade-r { background: rgba(192,57,43,0.12); color: #ff6b5b; border: 1px solid var(--red-dim); }
+
+  .uv-pos { color: var(--purple); font-size: 10px; }
+
+  .empty-state { padding: 36px 16px; text-align: center; font-family: var(--mono); font-size: 11px; color: var(--text3); letter-spacing: 0.06em; }
+
+  .no-samples { padding: 28px; text-align: center; }
+  .no-samples-icon { font-size: 28px; opacity: 0.2; margin-bottom: 8px; }
+  .no-samples-text { font-family: var(--mono); font-size: 11px; color: var(--text3); letter-spacing: 0.06em; }
+
+  .clear-btn { font-family: var(--mono); font-size: 9px; color: var(--text3); background: transparent; border: 1px solid var(--border); padding: 3px 9px; border-radius: 2px; cursor: pointer; letter-spacing: 0.06em; text-transform: uppercase; transition: all 0.15s; }
+  .clear-btn:hover { border-color: var(--red-dim); color: #ff6b5b; }
+
+  .toast { position: fixed; bottom: 20px; right: 20px; background: var(--bg3); border: 1px solid var(--green); color: var(--green); font-family: var(--mono); font-size: 11px; padding: 9px 14px; border-radius: 3px; letter-spacing: 0.06em; opacity: 0; transform: translateY(6px); transition: all 0.2s ease; pointer-events: none; z-index: 100; }
+  .toast.show { opacity: 1; transform: translateY(0); }
+  .toast.warn { border-color: var(--amber); color: var(--amber); }
+  .toast.err { border-color: var(--red); color: #ff6b5b; }
+
+  .incoming-flash { animation: incoming 0.6s ease; }
+  @keyframes incoming { 0%{background:rgba(124,184,66,0.15)} 100%{background:transparent} }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo">BerryCheck <span>QC</span></div>
+  <div class="header-right">
+    <div style="display:flex;align-items:center;gap:6px">
+      <div class="live-dot" id="live-dot"></div>
+      <div class="live-label" id="live-label">Waiting for camera...</div>
+    </div>
+    <a class="camera-link" href="/capture" target="_blank">📷 Open on iPhone →</a>
+    <div class="clock" id="clock">--:--:--</div>
+  </div>
+</div>
+
+<div class="layout">
+
+  <div class="sidebar">
+
+    <div>
+      <div class="section-label">Lot information</div>
+      <div class="form-group">
+        <label class="form-label">Lot ID</label>
+        <input type="text" id="lot-id" placeholder="e.g. LOT-0042" />
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Grower</label>
+          <input type="text" id="grower" placeholder="Name" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Variety</label>
+          <select id="variety">
+            <option value="">Select</option>
+            <option>Jewel</option><option>Star</option><option>Farthing</option>
+            <option>Emerald</option><option>Springhigh</option><option>Bluecrisp</option><option>Other</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Sample wt (g)</label>
+          <input type="number" id="sample-weight" placeholder="300" min="0" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Buyer spec</label>
+          <select id="buyer-spec">
+            <option value="usno1">US No. 1</option>
+            <option value="usno2">US No. 2</option>
+            <option value="premium">Premium (2%)</option>
+            <option value="export">Export (1%)</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <hr class="divider" />
+
+    <div>
+      <div class="section-label">Camera output</div>
+      <div class="camera-panel" id="camera-panel">
+        <div class="camera-header">
+          <div style="display:flex;align-items:center;gap:7px">
+            <div class="camera-dot" id="cam-dot"></div>
+            <div class="camera-source" id="cam-source">Waiting for iPhone...</div>
+          </div>
+          <div id="cam-time" style="font-family:var(--mono);font-size:9px;color:var(--text3)"></div>
+        </div>
+        <div class="count-grid">
+          <div class="count-field">
+            <div class="count-field-label">Total berries</div>
+            <input type="number" id="total-count" placeholder="0" min="0" />
+          </div>
+          <div class="count-field">
+            <div class="count-field-label">Softs</div>
+            <input type="number" id="soft-count" placeholder="0" min="0" />
+          </div>
+          <div class="count-field">
+            <div class="count-field-label">Red / unripe</div>
+            <input type="number" id="red-count" placeholder="0" min="0" />
+          </div>
+          <div class="count-field">
+            <div class="count-field-label">Anthracnose</div>
+            <input type="number" id="anthr-count" placeholder="0" min="0" />
+          </div>
+        </div>
+        <div class="uv-row">
+          <div class="uv-label">UV — Botrytis flag</div>
+          <div class="toggle-group">
+            <button class="toggle-btn active-neg" id="uv-neg" onclick="setUV(false)">NEG</button>
+            <button class="toggle-btn" id="uv-pos" onclick="setUV(true)">POS</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <button class="submit-btn" onclick="submitSample()">▶ LOG SAMPLE</button>
+
+  </div>
+
+  <div class="main">
+
+    <div class="status-bar">
+      <div class="stat-card neutral">
+        <div class="stat-label">Samples today</div>
+        <div class="stat-value" id="stat-samples">0</div>
+        <div class="stat-sub">lots checked</div>
+      </div>
+      <div class="stat-card neutral" id="card-soft">
+        <div class="stat-label">Avg soft rate</div>
+        <div class="stat-value" id="stat-soft">—</div>
+        <div class="stat-sub" id="stat-soft-sub">no data</div>
+      </div>
+      <div class="stat-card neutral" id="card-defect">
+        <div class="stat-label">Avg total defect</div>
+        <div class="stat-value" id="stat-defect">—</div>
+        <div class="stat-sub" id="stat-defect-sub">no data</div>
+      </div>
+      <div class="stat-card neutral" id="card-grade">
+        <div class="stat-label">Last grade</div>
+        <div class="stat-value" id="stat-grade" style="font-size:18px;margin-top:6px">—</div>
+        <div class="stat-sub" id="stat-lot-sub">no sample yet</div>
+      </div>
+    </div>
+
+    <div class="thresholds-panel">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div class="section-label" style="margin:0">Grade thresholds — last sample</div>
+        <div id="active-spec-label" style="font-family:var(--mono);font-size:10px;color:var(--text3)"></div>
+      </div>
+      <div id="threshold-rows">
+        <div class="no-samples">
+          <div class="no-samples-icon">◎</div>
+          <div class="no-samples-text">Log a sample to see grade analysis</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="history-panel">
+      <div class="history-header">
+        <div class="section-label" style="margin:0">Sample history</div>
+        <button class="clear-btn" onclick="clearHistory()">Clear</button>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Time</th><th>Lot</th><th>Grower</th><th>Variety</th>
+            <th>Total</th><th>Softs</th><th>Defect %</th><th>UV</th><th>Grade</th><th>Headroom</th>
+          </tr>
+        </thead>
+        <tbody id="history-body">
+          <tr><td colspan="10"><div class="empty-state">No samples logged yet</div></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const SPECS = {
+  usno1:   { label: 'US No. 1',     soft: 5,  defect: 10, red: 5,  anthr: 3   },
+  usno2:   { label: 'US No. 2',     soft: 10, defect: 20, red: 10, anthr: 8   },
+  premium: { label: 'Premium (2%)', soft: 2,  defect: 4,  red: 2,  anthr: 1   },
+  export:  { label: 'Export (1%)',  soft: 1,  defect: 2,  red: 1,  anthr: 0.5 }
+};
+
+let uvPositive = false;
+let history = JSON.parse(localStorage.getItem('qc_history') || '[]');
+let lastSeenTimestamp = null;
+let cameraLive = false;
+
+// Poll for new camera results every 2 seconds
+setInterval(pollCamera, 2000);
+
+async function pollCamera() {
+  try {
+    const res = await fetch('/latest');
+    const data = await res.json();
+    if (!data.timestamp) return;
+
+    if (data.timestamp !== lastSeenTimestamp) {
+      lastSeenTimestamp = data.timestamp;
+      injectCameraResult(data);
+    }
+
+    if (!cameraLive) {
+      cameraLive = true;
+      document.getElementById('live-dot').classList.add('active');
+      document.getElementById('live-label').textContent = 'Camera connected';
+      document.getElementById('cam-dot').classList.add('live');
+    }
+  } catch (e) {}
+}
+
+function injectCameraResult(data) {
+  const fields = [
+    { id: 'total-count', val: data.total },
+    { id: 'soft-count',  val: data.softs },
+    { id: 'red-count',   val: data.reds },
+    { id: 'anthr-count', val: data.anthracnose }
+  ];
+
+  fields.forEach(f => {
+    const el = document.getElementById(f.id);
+    el.value = f.val || 0;
+    el.classList.add('autofilled');
+    setTimeout(() => el.classList.remove('autofilled'), 1500);
+  });
+
+  document.getElementById('cam-source').textContent = 'iPhone camera';
+  document.getElementById('cam-time').textContent = data.timestamp || '';
+  document.getElementById('camera-panel').classList.add('fresh');
+  setTimeout(() => document.getElementById('camera-panel').classList.remove('fresh'), 2000);
+
+  // Animate the sidebar
+  document.querySelector('.sidebar').classList.add('incoming-flash');
+  setTimeout(() => document.querySelector('.sidebar').classList.remove('incoming-flash'), 600);
+
+  if (data.notes) {
+    showToast('📷 ' + data.notes, '');
+  } else {
+    showToast('📷 Camera counts loaded', '');
+  }
+}
+
+function setUV(positive) {
+  uvPositive = positive;
+  document.getElementById('uv-neg').className = 'toggle-btn' + (positive ? '' : ' active-neg');
+  document.getElementById('uv-pos').className = 'toggle-btn' + (positive ? ' active-pos' : '');
+}
+
+function pct(n, total) {
+  if (!total) return 0;
+  return Math.round((n / total) * 1000) / 10;
+}
+
+function headroomColor(rem) {
+  if (rem < 0) return 'headroom-fail';
+  if (rem < 1.5) return 'headroom-warn';
+  return 'headroom-ok';
+}
+
+function barColor(rem, limit) {
+  if (rem < 0) return '#c0392b';
+  if (rem < limit * 0.2) return '#d4930a';
+  return '#7cb842';
+}
+
+function getGrade(softPct, defectPct, redPct, anthrPct, spec) {
+  const s = SPECS[spec];
+  if (softPct <= s.soft && defectPct <= s.defect && redPct <= s.red && anthrPct <= s.anthr) {
+    return { grade: spec, pass: true, downgrade: false };
+  }
+  for (const g of ['usno1', 'usno2']) {
+    const t = SPECS[g];
+    if (softPct <= t.soft && defectPct <= t.defect && redPct <= t.red && anthrPct <= t.anthr) {
+      return { grade: g, pass: false, downgrade: true };
+    }
+  }
+  return { grade: 'reject', pass: false, downgrade: false };
+}
+
+function renderThresholds(sample) {
+  const spec = SPECS[sample.spec];
+  document.getElementById('active-spec-label').textContent = spec.label.toUpperCase();
+
+  const rows = [
+    { name: 'Softs',        val: sample.softPct,   limit: spec.soft   },
+    { name: 'Total defect', val: sample.defectPct, limit: spec.defect },
+    { name: 'Red / unripe', val: sample.redPct,    limit: spec.red    },
+    { name: 'Anthracnose',  val: sample.anthrPct,  limit: spec.anthr  },
+  ];
+
+  document.getElementById('threshold-rows').innerHTML = rows.map(r => {
+    const cap = r.limit * 1.5;
+    const w = Math.min(100, (r.val / cap) * 100);
+    const m = (r.limit / cap) * 100;
+    const rem = Math.round((r.limit - r.val) * 10) / 10;
+    const col = barColor(rem, r.limit);
+    const hc = headroomColor(rem);
+    const vc = rem < 0 ? '#ff6b5b' : rem < r.limit * 0.2 ? '#d4930a' : 'var(--text)';
+    return `<div class="threshold-row">
+      <div class="threshold-name">${r.name}</div>
+      <div class="bar-track">
+        <div class="bar-fill" style="width:${w}%;background:${col}"></div>
+        <div class="bar-marker" style="left:${m}%"></div>
+      </div>
+      <div class="threshold-pct" style="color:${vc}">${r.val}%</div>
+      <div class="threshold-headroom ${hc}">${rem >= 0 ? '+' : ''}${rem}% left</div>
+    </div>`;
+  }).join('');
+}
+
+function renderHistory() {
+  const tbody = document.getElementById('history-body');
+  if (!history.length) {
+    tbody.innerHTML = '<tr><td colspan="10"><div class="empty-state">No samples logged yet</div></td></tr>';
+    return;
+  }
+  tbody.innerHTML = history.slice().reverse().map(s => {
+    const gb = s.grade === 'reject'
+      ? `<span class="grade-badge grade-r">REJECT</span>`
+      : s.grade === 'usno2'
+      ? `<span class="grade-badge grade-2">US NO.2</span>`
+      : `<span class="grade-badge grade-1">${SPECS[s.grade]?.label.toUpperCase() || s.grade}</span>`;
+    const uv = s.uvPositive ? `<span class="uv-pos">⚠ POS</span>` : `<span style="color:var(--text3)">neg</span>`;
+    const rem = Math.round((SPECS[s.spec].soft - s.softPct) * 10) / 10;
+    const hc = headroomColor(rem);
+    return `<tr>
+      <td>${s.time}</td>
+      <td style="color:var(--text)">${s.lotId || '—'}</td>
+      <td>${s.grower || '—'}</td>
+      <td>${s.variety || '—'}</td>
+      <td>${s.total}</td>
+      <td>${s.softs} <span style="color:var(--text3)">(${s.softPct}%)</span></td>
+      <td style="color:${s.defectPct > SPECS[s.spec].defect ? '#ff6b5b' : 'var(--text2)'}">${s.defectPct}%</td>
+      <td>${uv}</td>
+      <td>${gb}</td>
+      <td class="${hc}">${rem >= 0 ? '+' : ''}${rem}%</td>
+    </tr>`;
+  }).join('');
+}
+
+function updateStatCards() {
+  document.getElementById('stat-samples').textContent = history.length;
+  if (!history.length) return;
+
+  const avgSoft = Math.round(history.reduce((a, s) => a + s.softPct, 0) / history.length * 10) / 10;
+  const avgDef  = Math.round(history.reduce((a, s) => a + s.defectPct, 0) / history.length * 10) / 10;
+  const last = history[history.length - 1];
+  const sl = SPECS[last.spec].soft;
+  const dl = SPECS[last.spec].defect;
+
+  const sc = document.getElementById('card-soft');
+  sc.className = 'stat-card ' + (avgSoft > sl ? 'fail' : avgSoft > sl * 0.7 ? 'warn' : 'ok');
+  document.getElementById('stat-soft').textContent = avgSoft + '%';
+  document.getElementById('stat-soft-sub').textContent = 'limit: ' + sl + '%';
+
+  const dc = document.getElementById('card-defect');
+  dc.className = 'stat-card ' + (avgDef > dl ? 'fail' : avgDef > dl * 0.7 ? 'warn' : 'ok');
+  document.getElementById('stat-defect').textContent = avgDef + '%';
+  document.getElementById('stat-defect-sub').textContent = 'limit: ' + dl + '%';
+
+  const gc = document.getElementById('card-grade');
+  gc.className = 'stat-card ' + (last.grade === 'reject' ? 'fail' : last.grade === 'usno2' ? 'warn' : 'ok');
+  document.getElementById('stat-grade').textContent = last.grade === 'reject' ? 'REJECT' : SPECS[last.grade]?.label || last.grade;
+  document.getElementById('stat-lot-sub').textContent = last.lotId || 'last sample';
+}
+
+function submitSample() {
+  const total = parseInt(document.getElementById('total-count').value) || 0;
+  const softs = parseInt(document.getElementById('soft-count').value) || 0;
+  const reds  = parseInt(document.getElementById('red-count').value) || 0;
+  const anthr = parseInt(document.getElementById('anthr-count').value) || 0;
+  const spec  = document.getElementById('buyer-spec').value;
+
+  if (!total) { showToast('Enter total berry count first', 'warn'); return; }
+
+  const softPct   = pct(softs, total);
+  const redPct    = pct(reds, total);
+  const anthrPct  = pct(anthr, total);
+  const defectPct = pct(softs + reds + anthr, total);
+  const result    = getGrade(softPct, defectPct, redPct, anthrPct, spec);
+
+  const sample = {
+    time: new Date().toTimeString().slice(0,8),
+    lotId: document.getElementById('lot-id').value || '',
+    grower: document.getElementById('grower').value || '',
+    variety: document.getElementById('variety').value || '',
+    total, softs, reds, anthr,
+    softPct, redPct, anthrPct, defectPct,
+    uvPositive, spec,
+    grade: result.grade
+  };
+
+  history.push(sample);
+  localStorage.setItem('qc_history', JSON.stringify(history));
+
+  renderThresholds(sample);
+  renderHistory();
+  updateStatCards();
+
+  ['total-count','soft-count','red-count','anthr-count'].forEach(id => document.getElementById(id).value = '');
+  setUV(false);
+
+  const msg = result.grade === 'reject' ? '⚠ REJECT logged' : result.downgrade ? '⚠ Downgrade — ' + SPECS[result.grade].label : '✓ Logged — ' + SPECS[result.grade].label;
+  showToast(msg, result.grade === 'reject' ? 'err' : result.downgrade ? 'warn' : '');
+}
+
+function clearHistory() {
+  if (!history.length) return;
+  history = [];
+  localStorage.removeItem('qc_history');
+  renderHistory();
+  document.getElementById('threshold-rows').innerHTML = `<div class="no-samples"><div class="no-samples-icon">◎</div><div class="no-samples-text">Log a sample to see grade analysis</div></div>`;
+  ['card-soft','card-defect','card-grade'].forEach(id => document.getElementById(id).className = 'stat-card neutral');
+  document.getElementById('stat-samples').textContent = '0';
+  document.getElementById('stat-soft').textContent = '—';
+  document.getElementById('stat-defect').textContent = '—';
+  document.getElementById('stat-grade').textContent = '—';
+  document.getElementById('stat-soft-sub').textContent = 'no data';
+  document.getElementById('stat-defect-sub').textContent = 'no data';
+  document.getElementById('stat-lot-sub').textContent = 'no sample yet';
+}
+
+function showToast(msg, type) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (type ? ' ' + type : '');
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+function tick() { document.getElementById('clock').textContent = new Date().toTimeString().slice(0,8); }
+setInterval(tick, 1000); tick();
+
+if (history.length) { renderHistory(); updateStatCards(); renderThresholds(history[history.length-1]); }
+</script>
+</body>
+</html>
