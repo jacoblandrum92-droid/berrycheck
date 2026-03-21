@@ -66,7 +66,7 @@ export default function LogManager({ history, onUpdateHistory, onClose }) {
                 border: `1px solid ${COLORS.border2}`, color: COLORS.text,
                 padding: '4px 10px', borderRadius: 3, outline: 'none', width: 140,
               }}
-              placeholder="Filter by Lot ID"
+              placeholder="Filter by Pallet Tag"
               value={filter}
               onChange={e => setFilter(e.target.value)}
             />
@@ -83,13 +83,14 @@ export default function LogManager({ history, onUpdateHistory, onClose }) {
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr>
-                {['Date', 'Time', 'Type', 'Lot', 'Grower', 'Variety', 'Wt(g)',
+                {['Date', 'Time', 'Type', 'Pallet', 'Grower', 'Variety', 'Wt(g)',
                   'Good', 'Soft', 'Major', 'Red', 'Green', 'Defect', 'Zero',
                   'Score', ''].map(h => (
                   <th key={h} style={thStyle}>{h}</th>
                 ))}
               </tr>
             </thead>
+
             <tbody>
               {filtered.length === 0 ? (
                 <tr>

@@ -157,11 +157,11 @@ export default function LotPanel({
         fontFamily: FONT, fontSize: 10, fontWeight: 600,
         letterSpacing: '0.12em', textTransform: 'uppercase',
         color: COLORS.text3, marginBottom: 8,
-      }}>Lot Information</div>
+      }}>Pallet Information</div>
 
       <div style={{ marginBottom: 10 }}>
-        <label style={labelStyle}>Lot ID</label>
-        <input style={inputStyle} value={lotId} onChange={e => setLotId(e.target.value)} placeholder="e.g. LOT-0042" />
+        <label style={labelStyle}>Pallet Tag</label>
+        <input style={inputStyle} value={lotId} onChange={e => setLotId(e.target.value)} placeholder="e.g. P-0042" />
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>

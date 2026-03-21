@@ -40,7 +40,7 @@ export default function SampleHistory({ history, onClear }) {
             <tr>
               <th style={thStyle}>Time</th>
               <th style={thStyle}>Type</th>
-              <th style={thStyle}>Lot</th>
+              <th style={thStyle}>Pallet</th>
               <th style={thStyle}>Grower</th>
               <th style={thStyle}>Total</th>
               <th style={thStyle}>Soft</th>
