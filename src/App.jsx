@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react'
-import { COLORS, FONT } from './constants'
+import { COLORS, FONT, gradeSample } from './constants'
 import { useRelay } from './useRelay'
 import { countBerriesInZones } from './imageProcessor'
 import { ensureLandscape } from './rotateImage'
@@ -10,6 +10,7 @@ import CountEntry from './components/CountEntry'
 import ThresholdBars from './components/ThresholdBars'
 import SampleHistory from './components/SampleHistory'
 import LotSummary from './components/LotSummary'
+import OpsPanel from './components/OpsPanel'
 import CameraCapture from './components/CameraCapture'
 import PhoneCapture from './components/PhoneCapture'
 import ZoneEditor from './components/ZoneEditor'
@@ -377,6 +378,11 @@ function Dashboard() {
         <div style={{ padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 18, overflowY: 'auto' }}>
           <ScoreDisplay counts={counts} />
           <ThresholdBars counts={counts} />
+          <OpsPanel
+            berryScore={(() => { const r = gradeSample(counts); return r.score })()}
+            history={history}
+            lotId={lotId}
+          />
           <LotSummary lotId={lotId} history={history} />
           <SampleHistory history={history} onClear={clearHistory} />
         </div>
