@@ -9,6 +9,7 @@ import LotPanel from './components/LotPanel'
 import CountEntry from './components/CountEntry'
 import ThresholdBars from './components/ThresholdBars'
 import SampleHistory from './components/SampleHistory'
+import LotSummary from './components/LotSummary'
 import CameraCapture from './components/CameraCapture'
 import PhoneCapture from './components/PhoneCapture'
 import ZoneEditor from './components/ZoneEditor'
@@ -376,6 +377,7 @@ function Dashboard() {
         <div style={{ padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 18, overflowY: 'auto' }}>
           <ScoreDisplay counts={counts} />
           <ThresholdBars counts={counts} />
+          <LotSummary lotId={lotId} history={history} />
           <SampleHistory history={history} onClear={clearHistory} />
         </div>
       </div>
