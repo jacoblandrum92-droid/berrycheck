@@ -93,11 +93,15 @@ const inputStyle = {
   padding: '7px 10px', borderRadius: 3, outline: 'none',
 }
 
-// Preset tare weights — add new clamshells here
+// Preset clamshell types — tare weights saved per key in localStorage
 const TARE_PRESETS = [
-  { key: 'smi',      label: 'SMI Pint + Label',      tare: null },
-  { key: 'highland', label: 'Highland Pint + Label',  tare: null },
-  { key: 'custom',   label: 'Custom',                 tare: null },
+  { key: 'smi_pint',      label: 'SMI Pint' },
+  { key: 'smi_flat',      label: 'SMI Flat Pint' },
+  { key: 'smi_18oz',      label: 'SMI 18oz' },
+  { key: 'high_pint',     label: 'Highland Pint' },
+  { key: 'high_flat',     label: 'Highland Flat Pint' },
+  { key: 'high_18oz',     label: 'Highland 18oz' },
+  { key: 'custom',        label: 'Custom' },
 ]
 
 function loadTares() {
@@ -114,7 +118,7 @@ export default function LotPanel({
   lotId, setLotId, grower, setGrower, variety, setVariety,
   sampleWeight, setSampleWeight, packType, setPackType
 }) {
-  const [tareKey, setTareKey] = useState('smi')
+  const [tareKey, setTareKey] = useState('smi_pint')
   const [grossWeight, setGrossWeight] = useState('')
   const [savedTares, setSavedTares] = useState(loadTares)
   const [editingTare, setEditingTare] = useState(false)
@@ -201,21 +205,15 @@ export default function LotPanel({
         background: COLORS.bg3, border: `1px solid ${COLORS.border}`,
         borderRadius: 4, padding: 10, marginBottom: 10,
       }}>
-        <label style={labelStyle}>Clamshell Tare</label>
-        <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+        <label style={labelStyle}>Clamshell</label>
+        <select style={{ ...inputStyle, marginBottom: 8 }} value={tareKey}
+          onChange={e => handleTareSelect(e.target.value)}>
           {TARE_PRESETS.map(p => (
-            <button key={p.key} onClick={() => handleTareSelect(p.key)} style={{
-              flex: 1, fontFamily: FONT, fontSize: 9, fontWeight: 600,
-              color: tareKey === p.key ? COLORS.green : COLORS.text3,
-              background: tareKey === p.key ? COLORS.greenDim + '40' : 'transparent',
-              border: `1px solid ${tareKey === p.key ? COLORS.greenDim : COLORS.border}`,
-              padding: '5px 4px', borderRadius: 3, cursor: 'pointer',
-              letterSpacing: '0.04em', textTransform: 'uppercase',
-            }}>
-              {p.key === 'custom' ? 'Custom' : p.key.toUpperCase()}
-            </button>
+            <option key={p.key} value={p.key}>
+              {p.label}{savedTares[p.key] ? ` (${savedTares[p.key]}g)` : ''}
+            </option>
           ))}
-        </div>
+        </select>
 
         {/* Tare value display + edit */}
         <div style={{
