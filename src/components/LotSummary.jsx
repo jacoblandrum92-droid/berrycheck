@@ -1,12 +1,14 @@
 import React from 'react'
-import { COLORS, FONT, MBG_LIMITS, gradeSample } from '../constants'
+import { COLORS, FONT, gradeSample } from '../constants'
 
-/**
- * Lot accumulation panel.
- * Shows official pallet grade (avg of 3 SOP samples)
- * and enhanced grade (all samples including extras).
- * Skipped layers are excluded from averages.
- */
+const GRADE_COLORS = {
+  excellent: '#0F6E56',
+  ok: '#0F6E56',
+  warn: '#BA7517',
+  fail: '#A32D2D',
+  none: '#999',
+}
+
 export default function LotSummary({ lotId, history }) {
   if (!lotId) return null
 
@@ -15,7 +17,7 @@ export default function LotSummary({ lotId, history }) {
 
   const official = lotSamples.filter(s => !s.isExtra && !s.isSkipped)
   const extras = lotSamples.filter(s => s.isExtra)
-  const allReal = [...official, ...extras] // everything except skipped
+  const allReal = [...official, ...extras]
 
   const officialAvg = averageSamples(official)
   const enhancedAvg = allReal.length > official.length ? averageSamples(allReal) : null
@@ -49,7 +51,6 @@ export default function LotSummary({ lotId, history }) {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: enhancedGrade ? '1fr 1fr' : '1fr', gap: 12 }}>
-        {/* Official SOP Grade */}
         <GradeCard
           title="SOP Grade (Official)"
           subtitle={`${official.length} sample${official.length !== 1 ? 's' : ''} averaged`}
@@ -57,8 +58,6 @@ export default function LotSummary({ lotId, history }) {
           grade={officialGrade}
           isOfficial
         />
-
-        {/* Enhanced Grade */}
         {enhancedGrade && (
           <GradeCard
             title="Enhanced Grade"
@@ -86,46 +85,36 @@ export default function LotSummary({ lotId, history }) {
               const layerNames = { 1: 'BTM', 2: 'MID', 3: 'TOP' }
 
               if (skipped) {
-                return (
-                  <SampleChip key={num} label={`#${num} ${layerNames[num]}`}
-                    value="SKIP" color={COLORS.text3} dimmed />
-                )
+                return <SampleChip key={num} label={`#${num} ${layerNames[num]}`}
+                  value="SKIP" color={COLORS.text3} dimmed />
               }
               if (!sample) {
-                return (
-                  <SampleChip key={num} label={`#${num} ${layerNames[num]}`}
-                    value="—" color={COLORS.text3} dimmed />
-                )
+                return <SampleChip key={num} label={`#${num} ${layerNames[num]}`}
+                  value="—" color={COLORS.text3} dimmed />
               }
 
               const result = gradeSample(sample)
-              const scoreColor = result.status === 'zero_tolerance' ? '#ff0040'
-                : result.status === 'fail' ? '#ff6b5b'
-                : result.status === 'warn' ? COLORS.amber
-                : COLORS.green
+              const color = GRADE_COLORS[result.status] || COLORS.text3
 
               return (
                 <SampleChip key={num} label={`#${num} ${layerNames[num]}`}
-                  value={result.score === null ? 'FAIL' : (result.score > 0 ? '+' : '') + result.score}
-                  color={scoreColor}
-                  detail={`S:${sample.soft || 0} M:${sample.major || 0} D:${(sample.reds || 0) + (sample.greens || 0) + (sample.defects || 0)}`}
+                  value={result.label || '—'}
+                  color={color}
+                  detail={`P:${sample.permanent || 0} C:${sample.condition || 0} D:${sample.decay || 0}`}
                 />
               )
             })}
           </div>
 
-          {/* Extra samples */}
           {extras.length > 0 && (
             <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
               {extras.map((s, i) => {
                 const result = gradeSample(s)
-                const scoreColor = result.status === 'fail' ? '#ff6b5b'
-                  : result.status === 'warn' ? COLORS.amber
-                  : COLORS.green
+                const color = GRADE_COLORS[result.status] || COLORS.text3
                 return (
                   <SampleChip key={s.id} label={`EX${i + 1}`}
-                    value={result.score === null ? 'FAIL' : (result.score > 0 ? '+' : '') + result.score}
-                    color={scoreColor} extra />
+                    value={result.label || '—'}
+                    color={color} extra />
                 )
               })}
             </div>
@@ -139,21 +128,16 @@ export default function LotSummary({ lotId, history }) {
 function GradeCard({ title, subtitle, avg, grade, isOfficial }) {
   if (!grade) return null
 
-  const scoreColor = grade.status === 'zero_tolerance' ? '#ff0040'
-    : grade.status === 'fail' ? '#ff6b5b'
-    : grade.status === 'warn' ? COLORS.amber
-    : COLORS.green
-
-  const limits = MBG_LIMITS
+  const gradeColor = GRADE_COLORS[grade.status] || COLORS.text3
 
   return (
     <div style={{
-      background: COLORS.bg3, border: `1px solid ${isOfficial ? scoreColor + '40' : COLORS.border}`,
+      background: COLORS.bg3, border: `1px solid ${isOfficial ? gradeColor + '40' : COLORS.border}`,
       borderRadius: 4, padding: 12, position: 'relative', overflow: 'hidden',
     }}>
       <div style={{
         position: 'absolute', top: 0, left: 0, right: 0, height: 2,
-        background: scoreColor,
+        background: gradeColor,
       }} />
       <div style={{
         fontFamily: FONT, fontSize: 9, color: COLORS.text3,
@@ -162,29 +146,20 @@ function GradeCard({ title, subtitle, avg, grade, isOfficial }) {
         {title}
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 6 }}>
-        <div style={{
-          fontFamily: FONT, fontSize: 36, fontWeight: 700,
-          color: scoreColor, lineHeight: 1,
-        }}>
-          {grade.score === null ? 'FAIL' : (grade.score > 0 ? '+' : '') + grade.score}
-        </div>
-        <div style={{
-          fontFamily: FONT, fontSize: 14, fontWeight: 600,
-          color: scoreColor,
-        }}>
-          {grade.label}
-        </div>
+      <div style={{
+        fontFamily: FONT, fontSize: 28, fontWeight: 700,
+        color: gradeColor, lineHeight: 1, marginBottom: 6,
+      }}>
+        {grade.label}
       </div>
 
-      {/* Averaged counts */}
       {avg && (
         <div style={{
           fontFamily: FONT, fontSize: 10, color: COLORS.text2, lineHeight: 1.8,
         }}>
-          <div>Soft: <span style={{ color: (avg.soft || 0) > limits.character.soft ? '#ff6b5b' : COLORS.text }}>{round1(avg.soft || 0)}</span>/{limits.character.soft}</div>
-          <div>Major: <span style={{ color: (avg.major || 0) > limits.character.crushedSplitLeak ? '#ff6b5b' : COLORS.text }}>{round1(avg.major || 0)}</span>/{limits.character.crushedSplitLeak}</div>
-          <div>Minor: <span style={{ color: ((avg.reds || 0) + (avg.greens || 0) + (avg.defects || 0)) > limits.defects.totalMax ? '#ff6b5b' : COLORS.text }}>{round1((avg.reds || 0) + (avg.greens || 0) + (avg.defects || 0))}</span>/{limits.defects.totalMax}</div>
+          <div>Permanent: <span style={{ fontWeight: 600, color: COLORS.text }}>{grade.pctPermanent}%</span></div>
+          <div>Condition: <span style={{ fontWeight: 600, color: COLORS.text }}>{grade.pctCondition}%</span></div>
+          <div>Combined: <span style={{ fontWeight: 600, color: grade.pctCombined >= 10 ? COLORS.red : COLORS.text }}>{grade.pctCombined}%</span></div>
         </div>
       )}
 
@@ -212,7 +187,7 @@ function SampleChip({ label, value, color, detail, dimmed, extra }) {
         {label}
       </div>
       <div style={{
-        fontFamily: FONT, fontSize: 16, fontWeight: 700, color, lineHeight: 1,
+        fontFamily: FONT, fontSize: 13, fontWeight: 700, color, lineHeight: 1,
       }}>
         {value}
       </div>
@@ -227,24 +202,13 @@ function SampleChip({ label, value, color, detail, dimmed, extra }) {
   )
 }
 
-/**
- * Average the counts across multiple samples.
- * Returns an object with averaged counts that can be fed into gradeSample().
- */
 function averageSamples(samples) {
   if (samples.length === 0) return null
-
-  const keys = ['good', 'soft', 'major', 'reds', 'greens', 'defects', 'zero']
+  const keys = ['good', 'permanent', 'condition', 'decay']
   const avg = {}
-
   for (const key of keys) {
     const sum = samples.reduce((a, s) => a + (s[key] || 0), 0)
     avg[key] = Math.round((sum / samples.length) * 10) / 10
   }
-
   return avg
-}
-
-function round1(n) {
-  return Math.round(n * 10) / 10
 }

@@ -17,10 +17,10 @@ import { COLORS, FONT } from '../constants'
 
 const DC_LEVELS = [
   { level: 1, label: 'Very Loose', desc: 'Supply short, DC accepting almost everything', color: COLORS.green },
-  { level: 2, label: 'Loose', desc: 'Below average strictness, some room to push', color: '#8bc34a' },
+  { level: 2, label: 'Loose', desc: 'Below average strictness, some room to push', color: '#4a9e6e' },
   { level: 3, label: 'Normal', desc: 'Standard grading, stay within MBG', color: COLORS.amber },
-  { level: 4, label: 'Strict', desc: 'Above average scrutiny, keep headroom', color: '#e06030' },
-  { level: 5, label: 'Very Strict', desc: 'Peak supply or DC cracking down, run clean', color: '#ff6b5b' },
+  { level: 4, label: 'Strict', desc: 'Above average scrutiny, keep headroom', color: '#D85A30' },
+  { level: 5, label: 'Very Strict', desc: 'Peak supply or DC cracking down, run clean', color: COLORS.red },
 ]
 
 export default function OpsPanel({ berryScore, history, lotId }) {
@@ -82,7 +82,7 @@ export default function OpsPanel({ berryScore, history, lotId }) {
     above: { text: 'ABOVE TARGET — ROOM TO PUSH', color: COLORS.green },
     dialed: { text: 'DIALED IN', color: COLORS.green },
     watch: { text: 'BELOW TARGET — WATCH IT', color: COLORS.amber },
-    over: { text: 'OVER — SLOW DOWN', color: '#ff6b5b' },
+    over: { text: 'OVER — SLOW DOWN', color: COLORS.red },
   }
 
   const ops = opsLabels[opsStatus]

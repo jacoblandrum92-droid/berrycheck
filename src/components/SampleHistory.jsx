@@ -1,6 +1,15 @@
 import React from 'react'
 import { COLORS, FONT, gradeSample } from '../constants'
 
+const GRADE_BG = {
+  excellent: '#E1F5EE', ok: '#E1F5EE',
+  warn: '#FAEEDA', fail: '#FCEBEB', none: '#f7f7f5',
+}
+const GRADE_TEXT = {
+  excellent: '#0F6E56', ok: '#0F6E56',
+  warn: '#BA7517', fail: '#A32D2D', none: '#999',
+}
+
 export default function SampleHistory({ history, onClear }) {
   const thStyle = {
     fontFamily: FONT, fontSize: 9, color: COLORS.text3,
@@ -41,12 +50,12 @@ export default function SampleHistory({ history, onClear }) {
               <th style={thStyle}>Time</th>
               <th style={thStyle}>Type</th>
               <th style={thStyle}>Pallet</th>
-              <th style={thStyle}>Grower</th>
+              <th style={thStyle}>Receipt</th>
               <th style={thStyle}>Total</th>
-              <th style={thStyle}>Soft</th>
-              <th style={thStyle}>Major</th>
-              <th style={thStyle}>Minor</th>
-              <th style={thStyle}>Score</th>
+              <th style={thStyle}>Perm</th>
+              <th style={thStyle}>Cond</th>
+              <th style={thStyle}>Decay</th>
+              <th style={thStyle}>Defect %</th>
               <th style={thStyle}>Grade</th>
             </tr>
           </thead>
@@ -60,19 +69,8 @@ export default function SampleHistory({ history, onClear }) {
             ) : (
               [...history].reverse().map(s => {
                 const result = gradeSample(s)
-                const totalMinor = (s.reds || 0) + (s.greens || 0) + (s.defects || 0)
-
-                const scoreColor = result.status === 'zero_tolerance' ? '#ff0040'
-                  : result.status === 'fail' ? '#ff6b5b'
-                  : result.status === 'warn' ? COLORS.amber
-                  : COLORS.green
-
-                const gradeColor = result.status === 'fail' || result.status === 'zero_tolerance'
-                  ? '#ff6b5b' : COLORS.green
-                const gradeBg = result.status === 'fail' || result.status === 'zero_tolerance'
-                  ? 'rgba(192,57,43,0.12)' : 'rgba(124,184,66,0.12)'
-                const gradeBorder = result.status === 'fail' || result.status === 'zero_tolerance'
-                  ? COLORS.redDim : COLORS.greenDim
+                const color = GRADE_TEXT[result.status] || COLORS.text3
+                const bg = GRADE_BG[result.status] || '#f7f7f5'
 
                 return (
                   <tr key={s.id} style={{
@@ -82,38 +80,29 @@ export default function SampleHistory({ history, onClear }) {
                     <td style={tdStyle}>{s.time}</td>
                     <td style={tdStyle}>
                       {s.isExtra ? (
-                        <span style={{
-                          fontFamily: FONT, fontSize: 9, fontWeight: 600,
-                          color: COLORS.purple, letterSpacing: '0.04em',
-                        }}>EXTRA</span>
+                        <span style={{ fontSize: 9, fontWeight: 600, color: COLORS.purple }}>EXTRA</span>
                       ) : (
-                        <span style={{
-                          fontFamily: FONT, fontSize: 9, fontWeight: 600,
-                          color: COLORS.text3,
-                        }}>{s.sampleNum ? `#${s.sampleNum}` : 'SOP'}</span>
+                        <span style={{ fontSize: 9, fontWeight: 600, color: COLORS.text3 }}>
+                          {s.sampleNum ? `#${s.sampleNum}` : 'SOP'}
+                        </span>
                       )}
                     </td>
                     <td style={{ ...tdStyle, color: COLORS.text }}>{s.lotId || '—'}</td>
-                    <td style={tdStyle}>{s.grower || '—'}</td>
+                    <td style={tdStyle}>{s.receiptNum || '—'}</td>
                     <td style={tdStyle}>{result.total}</td>
-                    <td style={{ ...tdStyle, color: (s.soft || 0) > 2 ? '#ff6b5b' : COLORS.text2 }}>
-                      {s.soft || 0}/2
+                    <td style={tdStyle}>{s.permanent || 0}</td>
+                    <td style={tdStyle}>{s.condition || 0}</td>
+                    <td style={{ ...tdStyle, color: (s.decay || 0) > 0 ? COLORS.red : COLORS.text2 }}>
+                      {s.decay || 0}
                     </td>
-                    <td style={{ ...tdStyle, color: (s.major || 0) > 1 ? '#ff6b5b' : COLORS.text2 }}>
-                      {s.major || 0}/1
-                    </td>
-                    <td style={{ ...tdStyle, color: totalMinor > 16 ? '#ff6b5b' : COLORS.text2 }}>
-                      {totalMinor}/16
-                    </td>
-                    <td style={{ ...tdStyle, fontWeight: 600, color: scoreColor }}>
-                      {result.score === null ? 'FAIL' : (result.score > 0 ? '+' : '') + result.score}
+                    <td style={{ ...tdStyle, fontWeight: 600, color }}>
+                      {result.pctCombined}%
                     </td>
                     <td style={tdStyle}>
                       <span style={{
                         fontFamily: FONT, fontSize: 10, fontWeight: 600,
                         padding: '2px 7px', borderRadius: 2, letterSpacing: '0.04em',
-                        background: gradeBg, color: gradeColor,
-                        border: `1px solid ${gradeBorder}`,
+                        background: bg, color,
                       }}>{result.label}</span>
                     </td>
                   </tr>

@@ -12,7 +12,9 @@
   "dependencies": {
     "@vitejs/plugin-react": "^6.0.1",
     "express": "^5.2.1",
+    "html5-qrcode": "^2.3.8",
     "http-proxy-middleware": "^3.0.5",
+    "qrcode": "^1.5.4",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "vite": "^8.0.1",

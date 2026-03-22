@@ -74,7 +74,7 @@ export default function AccuracyReport({ onClose }) {
           }}>
             <StatCard label="Total Samples" value={totalSamples} color={COLORS.text} />
             <StatCard label="Accepted As-Is" value={`${accuracyPct}%`}
-              color={accuracyPct >= 80 ? COLORS.green : accuracyPct >= 50 ? COLORS.amber : '#ff6b5b'} />
+              color={accuracyPct >= 80 ? COLORS.green : accuracyPct >= 50 ? COLORS.amber : COLORS.red} />
             <StatCard label="Operator Edits" value={editedSamples} color={COLORS.amber} />
           </div>
 
@@ -103,7 +103,7 @@ export default function AccuracyReport({ onClose }) {
                     <td style={{ ...tdStyle, color: zt.color }}>{zt.label}</td>
                     <td style={{
                       ...tdStyle, fontWeight: 600,
-                      color: s.exactPct >= 80 ? COLORS.green : s.exactPct >= 50 ? COLORS.amber : '#ff6b5b',
+                      color: s.exactPct >= 80 ? COLORS.green : s.exactPct >= 50 ? COLORS.amber : COLORS.red,
                     }}>{s.exactPct}%</td>
                     <td style={tdStyle}>{s.avgDiff === 0 ? '0' : `+/-${s.avgDiff}`}</td>
                     <td style={tdStyle}>{s.sampleCount}</td>
@@ -147,7 +147,7 @@ export default function AccuracyReport({ onClose }) {
                       const diff = a !== b
                       return (
                         <span key={zt.key} style={{
-                          color: diff ? '#ff6b5b' : COLORS.text3,
+                          color: diff ? COLORS.red : COLORS.text3,
                         }}>
                           {zt.label}: {a}→{b}
                         </span>

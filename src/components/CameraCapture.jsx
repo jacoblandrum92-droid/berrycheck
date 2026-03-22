@@ -151,7 +151,7 @@ export default function CameraCapture({ onResult, onBack }) {
 
   return (
     <div style={{
-      background: '#0a0d06',
+      background: COLORS.bg,
       minHeight: '100vh',
       display: 'flex',
       flexDirection: 'column',

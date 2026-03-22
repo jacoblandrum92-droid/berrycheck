@@ -44,7 +44,7 @@ export default function PhoneCapture() {
 
   return (
     <div style={{
-      background: '#0a0d06', minHeight: '100vh',
+      background: COLORS.bg, minHeight: '100vh',
       display: 'flex', flexDirection: 'column',
       fontFamily: FONT,
     }}>
@@ -62,9 +62,9 @@ export default function PhoneCapture() {
         </div>
         <div style={{
           fontSize: 11, padding: '4px 12px', borderRadius: 20,
-          background: connected ? '#0f1a06' : '#1a0805',
+          background: connected ? COLORS.greenDim : COLORS.redDim,
           border: `1px solid ${connected ? COLORS.greenDim : COLORS.redDim}`,
-          color: connected ? COLORS.green : '#ff6b5b',
+          color: connected ? COLORS.green : COLORS.red,
         }}>
           {connected ? 'LINKED' : 'NO CONNECTION'}
         </div>
@@ -142,7 +142,7 @@ export default function PhoneCapture() {
               fontSize: 13, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase',
               color: status === 'sent' ? COLORS.green
                 : status === 'sending' ? COLORS.amber
-                : status === 'error' ? '#ff6b5b'
+                : status === 'error' ? COLORS.red
                 : COLORS.text3,
             }}>
               {status === 'sent' ? 'SENT TO DASHBOARD'

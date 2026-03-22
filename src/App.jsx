@@ -1,11 +1,11 @@
 import React, { useState, useCallback } from 'react'
-import { COLORS, FONT, gradeSample } from './constants'
+import { COLORS, FONT, gradeSample, PACK_CRITERIA, GRADE_RANK } from './constants'
+import { loadReceipts } from './receipts'
 import { useRelay } from './useRelay'
 import { countBerriesInZones } from './imageProcessor'
 import { ensureLandscape } from './rotateImage'
 import Header from './components/Header'
 import ScoreDisplay from './components/ScoreDisplay'
-import LotPanel from './components/LotPanel'
 import CountEntry from './components/CountEntry'
 import ThresholdBars from './components/ThresholdBars'
 import SampleHistory from './components/SampleHistory'
@@ -16,10 +16,19 @@ import PhoneCapture from './components/PhoneCapture'
 import ZoneEditor from './components/ZoneEditor'
 import AccuracyReport from './components/AccuracyReport'
 import LogManager from './components/LogManager'
+import DumpScanner from './components/DumpScanner'
+import ReceiptManager from './components/ReceiptManager'
+import BarcodeSheet from './components/BarcodeSheet'
+import LineMonitor from './components/LineMonitor'
+import GradingGuide from './components/GradingGuide'
+import QCSetupBar from './components/QCSetupBar'
+import PackLogViewer, { PackLogInput } from './components/PackLog'
+import PackCodeManager from './components/PackCodeManager'
 
 export default function App() {
-  const isPhone = new URLSearchParams(window.location.search).get('mode') === 'phone'
-  if (isPhone) return <PhoneCapture />
+  const mode = new URLSearchParams(window.location.search).get('mode')
+  if (mode === 'phone') return <PhoneCapture />
+  if (mode === 'dump') return <DumpScanner />
   return <Dashboard />
 }
 
@@ -28,12 +37,12 @@ function Dashboard() {
 
   // Lot info
   const [lotId, setLotId] = useState('')
+  const [receiptNum, setReceiptNum] = useState('')
   const [grower, setGrower] = useState('')
   const [variety, setVariety] = useState('')
-  const [sampleWeight, setSampleWeight] = useState(0)
-  const [packType, setPackType] = useState('pint')
+  const [packCriteria, setPackCriteria] = useState('standard')
   // Counts
-  const [counts, setCounts] = useState({ good: 0, soft: 0, major: 0, reds: 0, greens: 0, defects: 0, zero: 0 })
+  const [counts, setCounts] = useState({ good: 0, permanent: 0, condition: 0, decay: 0 })
 
   // Incoming image from phone
   const [incomingImage, setIncomingImage] = useState(null)
@@ -46,6 +55,12 @@ function Dashboard() {
   const [showZoneEditor, setShowZoneEditor] = useState(false)
   const [showAccuracy, setShowAccuracy] = useState(false)
   const [showLogManager, setShowLogManager] = useState(false)
+  const [showReceipts, setShowReceipts] = useState(false)
+  const [showBarcodeSheet, setShowBarcodeSheet] = useState(false)
+  const [showGradingGuide, setShowGradingGuide] = useState(false)
+  const [showPackLog, setShowPackLog] = useState(false)
+  const [showPackCodes, setShowPackCodes] = useState(false)
+  const [detailedCounts, setDetailedCounts] = useState(false)
 
   // Training mode toggle — when ON, A/B data is saved for accuracy tracking
   const [trainingMode, setTrainingMode] = useState(() => {
@@ -109,8 +124,8 @@ function Dashboard() {
   }, [])
 
   const doLogSample = useCallback((isExtra) => {
-    const totalB = (counts.good || 0) + (counts.soft || 0) + (counts.major || 0) +
-      (counts.reds || 0) + (counts.greens || 0) + (counts.defects || 0) + (counts.zero || 0)
+    const totalB = (counts.good || 0) + (counts.permanent || 0) +
+      (counts.condition || 0) + (counts.decay || 0)
     if (!totalB) return
 
     // Count how many official (non-extra) samples exist for this lot
@@ -120,7 +135,7 @@ function Dashboard() {
       id: Date.now(),
       time: new Date().toLocaleTimeString('en-US', { hour12: false }),
       date: new Date().toLocaleDateString(),
-      lotId, grower, variety, sampleWeight, packType,
+      lotId, receiptNum, grower, variety, packCriteria,
       ...counts,
       isExtra,
       sampleNum: isExtra ? null : officialCount + 1, // 1, 2, 3 for official samples
@@ -143,7 +158,7 @@ function Dashboard() {
       })
     }
 
-    setCounts({ good: 0, soft: 0, major: 0, reds: 0, greens: 0, defects: 0, zero: 0 })
+    setCounts({ good: 0, permanent: 0, condition: 0, decay: 0 })
     setComputerCounts(null)
     setIncomingImage(null)
 
@@ -152,7 +167,7 @@ function Dashboard() {
       ? 'EXTRA SAMPLE LOGGED'
       : `SAMPLE ${sample.sampleNum}/3 LOGGED — ${layerNames[sample.sampleNum] || ''}`
     alert(`${label}\n\nDiscard sample berries before next sample.`)
-  }, [counts, computerCounts, lotId, grower, variety, history, saveHistory, saveAccuracyLog, trainingMode])
+  }, [counts, computerCounts, lotId, receiptNum, grower, variety, history, saveHistory, saveAccuracyLog, trainingMode])
 
   const logSample = useCallback(() => doLogSample(false), [doLogSample])
   const logExtraSample = useCallback(() => doLogSample(true), [doLogSample])
@@ -166,7 +181,7 @@ function Dashboard() {
       id: Date.now(),
       time: new Date().toLocaleTimeString('en-US', { hour12: false }),
       date: new Date().toLocaleDateString(),
-      lotId, grower, variety,
+      lotId, receiptNum, grower, variety,
       good: 0, soft: 0, major: 0, reds: 0, greens: 0, defects: 0, zero: 0,
       isExtra: false,
       isSkipped: true,
@@ -174,7 +189,56 @@ function Dashboard() {
     }
     saveHistory([...history, sample])
     alert(`${layerNames[officialCount]} LAYER SKIPPED`)
-  }, [lotId, grower, variety, history, saveHistory])
+  }, [lotId, receiptNum, grower, variety, history, saveHistory])
+
+  // Skip entire pallet — logs all remaining layers as skipped + pack log missed entry
+  const skipPallet = useCallback(() => {
+    if (!lotId) return alert('Set a pallet tag first')
+    if (!confirm(`Skip pallet ${lotId}? All samples will be marked as missed.`)) return
+
+    const officialCount = history.filter(s => s.lotId === lotId && !s.isExtra).length
+    const now = new Date()
+    const time = now.toLocaleTimeString('en-US', { hour12: false })
+    const date = now.toLocaleDateString()
+    const newSamples = []
+
+    // Log remaining layers as skipped
+    for (let i = officialCount; i < 3; i++) {
+      newSamples.push({
+        id: Date.now() + i,
+        time, date,
+        lotId, receiptNum, grower, variety, packCriteria,
+        good: 0, permanent: 0, condition: 0, decay: 0,
+        isExtra: false, isSkipped: true, isMissed: true,
+        sampleNum: i + 1,
+      })
+    }
+
+    if (newSamples.length > 0) {
+      saveHistory([...history, ...newSamples])
+    }
+
+    // Log missed entry in pack log
+    try {
+      const packLog = JSON.parse(localStorage.getItem('bc_packlog') || '[]')
+      const todayEntries = packLog.filter(e => e.date === date)
+      const maxNum = todayEntries.reduce((max, e) => Math.max(max, e.dailyPallet || 0), 0)
+      packLog.push({
+        id: Date.now() + 10,
+        time, date,
+        packCode: '—',
+        receiptNum: receiptNum || '',
+        grower: grower || '',
+        palletNum: lotId,
+        dailyPallet: maxNum + 1,
+        boxes: 0,
+        isMissed: true,
+      })
+      localStorage.setItem('bc_packlog', JSON.stringify(packLog))
+    } catch {}
+
+    alert(`Pallet ${lotId} marked as MISSED — ${3 - officialCount} sample(s) skipped`)
+  }, [lotId, receiptNum, grower, variety, packCriteria, history, saveHistory])
 
   const clearHistory = useCallback(() => saveHistory([]), [saveHistory])
 
@@ -208,176 +272,133 @@ function Dashboard() {
         }}
         onShowAccuracy={() => setShowAccuracy(true)}
         onShowLogs={() => setShowLogManager(true)}
+        onShowReceipts={() => setShowReceipts(true)}
+        onShowPackLog={() => setShowPackLog(true)}
+        onShowPackCodes={() => setShowPackCodes(true)}
         trainingMode={trainingMode}
         onToggleTraining={toggleTraining}
         relayConnected={connected}
         phonesOnline={phonesOnline}
       />
 
+      {/* Mode toggle */}
       <div style={{
-        display: 'grid', gridTemplateColumns: '340px 1fr',
-        minHeight: 'calc(100vh - 49px)',
+        display: 'flex', borderBottom: `1px solid ${COLORS.border}`,
+        background: COLORS.bg2,
       }}>
-        {/* Left sidebar */}
-        <div style={{
-          background: COLORS.bg2, borderRight: `1px solid ${COLORS.border}`,
-          padding: 18, display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto',
+        <button onClick={() => setView('qc')} style={{
+          flex: 1, fontFamily: FONT, fontSize: 12, fontWeight: 600,
+          letterSpacing: '0.08em', textTransform: 'uppercase',
+          padding: '10px 20px', cursor: 'pointer', border: 'none',
+          background: view === 'qc' ? COLORS.bg : COLORS.bg2,
+          color: view === 'qc' ? COLORS.green : COLORS.text3,
+          borderBottom: view === 'qc' ? `2px solid ${COLORS.green}` : '2px solid transparent',
         }}>
-          <LotPanel
+          QC Sample
+        </button>
+        <button onClick={() => setShowGradingGuide(true)} style={{
+          fontFamily: FONT, fontSize: 11, fontWeight: 700,
+          color: COLORS.text3, background: 'transparent',
+          border: 'none', padding: '10px 14px', cursor: 'pointer',
+        }} title="Grading Guide">
+          ?
+        </button>
+        <button onClick={() => setView('ops')} style={{
+          flex: 1, fontFamily: FONT, fontSize: 12, fontWeight: 600,
+          letterSpacing: '0.08em', textTransform: 'uppercase',
+          padding: '10px 20px', cursor: 'pointer', border: 'none',
+          background: view === 'ops' ? COLORS.bg : COLORS.bg2,
+          color: view === 'ops' ? COLORS.amber : COLORS.text3,
+          borderBottom: view === 'ops' ? `2px solid ${COLORS.amber}` : '2px solid transparent',
+        }}>
+          Operations
+        </button>
+      </div>
+
+      {view === 'qc' ? (
+        /* ========== QC MODE ========== */
+        <div style={{ minHeight: 'calc(100vh - 90px)' }}>
+          {/* QC Top strip — pallet setup */}
+          <QCSetupBar
             lotId={lotId} setLotId={setLotId}
+            receiptNum={receiptNum} setReceiptNum={setReceiptNum}
             grower={grower} setGrower={setGrower}
             variety={variety} setVariety={setVariety}
-            sampleWeight={sampleWeight} setSampleWeight={setSampleWeight}
-            packType={packType} setPackType={setPackType}
+            packCriteria={packCriteria} setPackCriteria={setPackCriteria}
+            history={history} skipLayer={skipLayer} skipPallet={skipPallet}
           />
 
-          <hr style={{ border: 'none', borderTop: `1px solid ${COLORS.border}` }} />
+          {/* Pack log input */}
+          <PackLogInput receiptNum={receiptNum} grower={grower} />
 
-          {/* Incoming image preview */}
-          {incomingImage && (
-            <div>
-              <div style={{
-                fontFamily: FONT, fontSize: 10, fontWeight: 600,
-                letterSpacing: '0.12em', textTransform: 'uppercase',
-                color: COLORS.text3, marginBottom: 8,
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              }}>
-                <span>
-                  Last Capture
-                  <span style={{ color: COLORS.green, marginLeft: 8, fontWeight: 400 }}>
-                    {incomingImage.timestamp}
-                  </span>
-                </span>
-                <button onClick={() => setShowZoneEditor(true)} style={{
-                  fontFamily: FONT, fontSize: 9, color: COLORS.amber,
-                  background: 'transparent', border: `1px solid ${COLORS.amberDim}`,
-                  padding: '2px 8px', borderRadius: 2, cursor: 'pointer',
-                  letterSpacing: '0.06em',
+          {/* Main QC area — sample input + grade */}
+          <div style={{
+            display: 'grid', gridTemplateColumns: '1fr 1fr',
+            gap: 24, padding: '20px 32px',
+            alignContent: 'start',
+          }}>
+            {/* LEFT — Sample input */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <CountEntry
+                counts={counts} setCounts={setCounts}
+                detailed={detailedCounts}
+                onToggleDetailed={() => setDetailedCounts(!detailedCounts)}
+              />
+
+              {/* Action buttons */}
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => {
+                  setCounts({ good: 0, permanent: 0, condition: 0, decay: 0 })
+                  setIncomingImage(null)
+                }} style={{
+                  flex: 1, background: COLORS.bg3,
+                  border: `1px solid ${COLORS.border2}`, color: COLORS.text3,
+                  fontFamily: FONT, fontSize: 11, fontWeight: 600,
+                  letterSpacing: '0.06em', textTransform: 'uppercase',
+                  padding: 14, borderRadius: 4, cursor: 'pointer',
                 }}>
-                  {hasZones ? 'EDIT ZONES' : 'DRAW ZONES'}
+                  DISCARD
+                </button>
+                <button onClick={logSample} style={{
+                  flex: 2, background: COLORS.greenDim,
+                  border: `2px solid ${COLORS.green}`, color: COLORS.green,
+                  fontFamily: FONT, fontSize: 14, fontWeight: 700,
+                  letterSpacing: '0.08em', textTransform: 'uppercase',
+                  padding: 14, borderRadius: 4, cursor: 'pointer',
+                }}>
+                  {(() => {
+                    const oc = history.filter(s => s.lotId === lotId && !s.isExtra).length
+                    const ln = { 0: 'LOG BOTTOM', 1: 'LOG MIDDLE', 2: 'LOG TOP' }
+                    return oc < 3 && lotId ? ln[oc] : 'LOG SAMPLE'
+                  })()}
+                </button>
+                <button onClick={logExtraSample} style={{
+                  flex: 1, background: COLORS.bg3,
+                  border: `1px solid ${COLORS.purple}`, color: COLORS.purple,
+                  fontFamily: FONT, fontSize: 11, fontWeight: 600,
+                  letterSpacing: '0.06em', textTransform: 'uppercase',
+                  padding: 14, borderRadius: 4, cursor: 'pointer',
+                }}>
+                  EXTRA
                 </button>
               </div>
-              <img
-                src={incomingImage.data}
-                onClick={() => setShowZoneEditor(true)}
-                style={{
-                  width: '100%', borderRadius: 4,
-                  border: `1px solid ${COLORS.border}`,
-                  cursor: 'pointer',
-                }}
-                alt="Captured tray"
-                title="Click to draw/edit zones"
-              />
-              {processing && (
-                <div style={{
-                  fontFamily: FONT, fontSize: 10, color: COLORS.amber,
-                  textAlign: 'center', marginTop: 6, letterSpacing: '0.08em',
-                }}>
-                  COUNTING...
-                </div>
-              )}
-              {!processing && hasZones && counts.total > 0 && (
-                <div style={{
-                  fontFamily: FONT, fontSize: 10, color: COLORS.green,
-                  textAlign: 'center', marginTop: 6, letterSpacing: '0.08em',
-                }}>
-                  AUTO-COUNTED — {counts.total} berries detected
-                </div>
-              )}
-              {!processing && !hasZones && (
-                <div style={{
-                  fontFamily: FONT, fontSize: 10, color: COLORS.amber,
-                  textAlign: 'center', marginTop: 6, letterSpacing: '0.08em',
-                  cursor: 'pointer',
-                }} onClick={() => setShowZoneEditor(true)}>
-                  CLICK IMAGE TO DRAW ZONES
-                </div>
-              )}
             </div>
-          )}
 
-          <CountEntry counts={counts} setCounts={setCounts} />
-
-          {/* Sample count indicator for current lot */}
-          {lotId && (() => {
-            const officialCount = history.filter(s => s.lotId === lotId && !s.isExtra).length
-            const extraCount = history.filter(s => s.lotId === lotId && s.isExtra).length
-            const layerNames = { 0: '#1 BOTTOM', 1: '#2 MIDDLE', 2: '#3 TOP' }
-            return (
-              <div style={{
-                fontFamily: FONT, fontSize: 10, color: COLORS.text3,
-                letterSpacing: '0.06em', textAlign: 'center',
-                padding: '4px 0',
-              }}>
-                <div>{lotId}: {officialCount}/3 official{extraCount > 0 ? ` + ${extraCount} extra` : ''}</div>
-                {officialCount < 3 ? (
-                  <div style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    gap: 8, marginTop: 4,
-                  }}>
-                    <span style={{ color: COLORS.green }}>
-                      NEXT: {layerNames[officialCount]} LAYER
-                    </span>
-                    <button onClick={skipLayer} style={{
-                      fontFamily: FONT, fontSize: 9, color: COLORS.amber,
-                      background: 'transparent', border: `1px solid ${COLORS.amberDim}`,
-                      padding: '2px 6px', borderRadius: 2, cursor: 'pointer',
-                      letterSpacing: '0.04em',
-                    }}>
-                      SKIP
-                    </button>
-                  </div>
-                ) : (
-                  <div style={{ color: COLORS.amber, marginTop: 2 }}>
-                    3/3 COMPLETE — extras only
-                  </div>
-                )}
-              </div>
-            )
-          })()}
-
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={() => {
-              setCounts({ good: 0, soft: 0, major: 0, reds: 0, greens: 0, defects: 0, zero: 0 })
-              setIncomingImage(null)
-            }} style={{
-              flex: 1, background: COLORS.bg3,
-              border: `1px solid ${COLORS.border2}`, color: COLORS.text3,
-              fontFamily: FONT, fontSize: 10, fontWeight: 600,
-              letterSpacing: '0.06em', textTransform: 'uppercase',
-              padding: 10, borderRadius: 3, cursor: 'pointer',
-            }}>
-              DISCARD
-            </button>
-            <button onClick={logSample} style={{
-              flex: 2, background: COLORS.greenDim,
-              border: `1px solid ${COLORS.green}`, color: COLORS.green,
-              fontFamily: FONT, fontSize: 11, fontWeight: 600,
-              letterSpacing: '0.08em', textTransform: 'uppercase',
-              padding: 10, borderRadius: 3, cursor: 'pointer',
-            }}>
-              {(() => {
-                const oc = history.filter(s => s.lotId === lotId && !s.isExtra).length
-                const ln = { 0: 'BOTTOM', 1: 'MIDDLE', 2: 'TOP' }
-                return oc < 3 && lotId ? `LOG ${ln[oc]}` : 'LOG SAMPLE'
-              })()}
-            </button>
-            <button onClick={logExtraSample} style={{
-              flex: 1, background: COLORS.bg3,
-              border: `1px solid ${COLORS.purple}`, color: COLORS.purple,
-              fontFamily: FONT, fontSize: 10, fontWeight: 600,
-              letterSpacing: '0.06em', textTransform: 'uppercase',
-              padding: 10, borderRadius: 3, cursor: 'pointer',
-            }}>
-              EXTRA
-            </button>
+            {/* RIGHT — Grade result + headroom */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <ScoreDisplay counts={counts} />
+              <ThresholdBars counts={counts} />
+              <LotSummary lotId={lotId} history={history} />
+            </div>
           </div>
         </div>
-
-        {/* Main content */}
-        <div style={{ padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 18, overflowY: 'auto' }}>
-          <ScoreDisplay counts={counts} />
-          <ThresholdBars counts={counts} />
+      ) : (
+        /* ========== OPS MODE ========== */
+        <div style={{
+          padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 20,
+          minHeight: 'calc(100vh - 90px)', overflowY: 'auto',
+        }}>
+          <LineMonitor />
           <OpsPanel
             berryScore={(() => { const r = gradeSample(counts); return r.score })()}
             history={history}
@@ -386,7 +407,7 @@ function Dashboard() {
           <LotSummary lotId={lotId} history={history} />
           <SampleHistory history={history} onClear={clearHistory} />
         </div>
-      </div>
+      )}
 
       {/* Zone editor overlay */}
       {showZoneEditor && incomingImage && (
@@ -412,6 +433,37 @@ function Dashboard() {
           }}
           onClose={() => setShowLogManager(false)}
         />
+      )}
+
+      {/* Receipt manager overlay */}
+      {showReceipts && (
+        <ReceiptManager
+          onClose={() => setShowReceipts(false)}
+          onPrint={() => {
+            setShowReceipts(false)
+            setShowBarcodeSheet(true)
+          }}
+        />
+      )}
+
+      {/* Barcode sheet overlay */}
+      {showBarcodeSheet && (
+        <BarcodeSheet onClose={() => setShowBarcodeSheet(false)} />
+      )}
+
+      {/* Pack log overlay */}
+      {showPackLog && (
+        <PackLogViewer onClose={() => setShowPackLog(false)} />
+      )}
+
+      {/* Pack code manager overlay */}
+      {showPackCodes && (
+        <PackCodeManager onClose={() => setShowPackCodes(false)} />
+      )}
+
+      {/* Grading guide overlay */}
+      {showGradingGuide && (
+        <GradingGuide onClose={() => setShowGradingGuide(false)} />
       )}
     </div>
   )

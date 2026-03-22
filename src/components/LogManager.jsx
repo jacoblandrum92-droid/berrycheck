@@ -1,13 +1,19 @@
 import React, { useState } from 'react'
-import { COLORS, FONT, ZONE_TYPES, gradeSample } from '../constants'
+import { COLORS, FONT, gradeSample } from '../constants'
+
+const GRADE_TEXT = {
+  excellent: '#0F6E56', ok: '#0F6E56',
+  warn: '#BA7517', fail: '#A32D2D', none: '#999',
+}
 
 export default function LogManager({ history, onUpdateHistory, onClose }) {
   const [editingId, setEditingId] = useState(null)
   const [editData, setEditData] = useState({})
-  const [filter, setFilter] = useState('') // lot ID filter
+  const [filter, setFilter] = useState('')
 
   const filtered = filter
-    ? history.filter(s => (s.lotId || '').toLowerCase().includes(filter.toLowerCase()))
+    ? history.filter(s => (s.lotId || '').toLowerCase().includes(filter.toLowerCase()) ||
+        (s.receiptNum || '').toLowerCase().includes(filter.toLowerCase()))
     : history
 
   const startEdit = (sample) => {
@@ -40,7 +46,7 @@ export default function LogManager({ history, onUpdateHistory, onClose }) {
 
   return (
     <div style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)',
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
       zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center',
     }}>
       <div style={{
@@ -64,9 +70,9 @@ export default function LogManager({ history, onUpdateHistory, onClose }) {
               style={{
                 fontFamily: FONT, fontSize: 11, background: COLORS.bg3,
                 border: `1px solid ${COLORS.border2}`, color: COLORS.text,
-                padding: '4px 10px', borderRadius: 3, outline: 'none', width: 140,
+                padding: '4px 10px', borderRadius: 3, outline: 'none', width: 160,
               }}
-              placeholder="Filter by Pallet Tag"
+              placeholder="Filter by Pallet/Receipt"
               value={filter}
               onChange={e => setFilter(e.target.value)}
             />
@@ -83,18 +89,17 @@ export default function LogManager({ history, onUpdateHistory, onClose }) {
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr>
-                {['Date', 'Time', 'Type', 'Pallet', 'Grower', 'Variety', 'Wt(g)',
-                  'Good', 'Soft', 'Major', 'Red', 'Green', 'Defect', 'Zero',
-                  'Score', ''].map(h => (
+                {['Date', 'Time', 'Type', 'Pallet', 'Receipt', 'Grower', 'Variety',
+                  'Good', 'Perm', 'Cond', 'Decay',
+                  'Defect %', 'Grade', ''].map(h => (
                   <th key={h} style={thStyle}>{h}</th>
                 ))}
               </tr>
             </thead>
-
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={16} style={{
+                  <td colSpan={14} style={{
                     ...tdStyle, textAlign: 'center', padding: 28, color: COLORS.text3,
                   }}>
                     {filter ? 'No matching records' : 'No samples logged yet'}
@@ -105,14 +110,12 @@ export default function LogManager({ history, onUpdateHistory, onClose }) {
                   const isEditing = editingId === s.id
                   const data = isEditing ? editData : s
                   const result = gradeSample(data)
+                  const color = GRADE_TEXT[result.status] || COLORS.text3
 
-                  const typeLabel = s.isSkipped ? 'SKIP'
-                    : s.isExtra ? 'EXTRA'
+                  const typeLabel = s.isSkipped ? 'SKIP' : s.isExtra ? 'EXTRA'
                     : s.sampleNum ? `#${s.sampleNum}` : 'SOP'
-
                   const typeColor = s.isSkipped ? COLORS.text3
-                    : s.isExtra ? COLORS.purple
-                    : COLORS.green
+                    : s.isExtra ? COLORS.purple : COLORS.green
 
                   return (
                     <tr key={s.id} style={{
@@ -125,19 +128,11 @@ export default function LogManager({ history, onUpdateHistory, onClose }) {
                       <td style={{ ...tdStyle, color: typeColor, fontWeight: 600 }}>{typeLabel}</td>
                       {isEditing ? (
                         <>
-                          <td style={tdStyle}>
-                            <input style={editInput} value={data.lotId || ''} onChange={e => updateField('lotId', e.target.value)} />
-                          </td>
-                          <td style={tdStyle}>
-                            <input style={editInput} value={data.grower || ''} onChange={e => updateField('grower', e.target.value)} />
-                          </td>
-                          <td style={tdStyle}>
-                            <input style={editInput} value={data.variety || ''} onChange={e => updateField('variety', e.target.value)} />
-                          </td>
-                          <td style={tdStyle}>
-                            <input style={{ ...editInput, width: 45 }} type="number" value={data.sampleWeight || ''} onChange={e => updateField('sampleWeight', parseFloat(e.target.value) || 0)} />
-                          </td>
-                          {['good', 'soft', 'major', 'reds', 'greens', 'defects', 'zero'].map(k => (
+                          <td style={tdStyle}><input style={editInput} value={data.lotId || ''} onChange={e => updateField('lotId', e.target.value)} /></td>
+                          <td style={tdStyle}><input style={editInput} value={data.receiptNum || ''} onChange={e => updateField('receiptNum', e.target.value)} /></td>
+                          <td style={tdStyle}><input style={editInput} value={data.grower || ''} onChange={e => updateField('grower', e.target.value)} /></td>
+                          <td style={tdStyle}><input style={editInput} value={data.variety || ''} onChange={e => updateField('variety', e.target.value)} /></td>
+                          {['good', 'permanent', 'condition', 'decay'].map(k => (
                             <td key={k} style={tdStyle}>
                               <input style={{ ...editInput, width: 35 }} type="number" min="0"
                                 value={data[k] || ''} onChange={e => updateField(k, parseInt(e.target.value) || 0)} />
@@ -147,20 +142,21 @@ export default function LogManager({ history, onUpdateHistory, onClose }) {
                       ) : (
                         <>
                           <td style={{ ...tdStyle, color: COLORS.text }}>{s.lotId || '—'}</td>
+                          <td style={tdStyle}>{s.receiptNum || '—'}</td>
                           <td style={tdStyle}>{s.grower || '—'}</td>
                           <td style={tdStyle}>{s.variety || '—'}</td>
-                          <td style={tdStyle}>{s.sampleWeight || '—'}</td>
                           <td style={{ ...tdStyle, color: COLORS.green }}>{s.good || 0}</td>
-                          <td style={{ ...tdStyle, color: (s.soft || 0) > 2 ? '#ff6b5b' : COLORS.text2 }}>{s.soft || 0}</td>
-                          <td style={{ ...tdStyle, color: (s.major || 0) > 1 ? '#ff6b5b' : COLORS.text2 }}>{s.major || 0}</td>
-                          <td style={tdStyle}>{s.reds || 0}</td>
-                          <td style={tdStyle}>{s.greens || 0}</td>
-                          <td style={tdStyle}>{s.defects || 0}</td>
-                          <td style={{ ...tdStyle, color: (s.zero || 0) > 0 ? '#ff0040' : COLORS.text2 }}>{s.zero || 0}</td>
+                          <td style={tdStyle}>{s.permanent || 0}</td>
+                          <td style={tdStyle}>{s.condition || 0}</td>
+                          <td style={{ ...tdStyle, color: (s.decay || 0) > 0 ? COLORS.red : COLORS.text2 }}>{s.decay || 0}</td>
                         </>
                       )}
-                      <td style={{ ...tdStyle, fontWeight: 600, color: result.status === 'fail' ? '#ff6b5b' : COLORS.green }}>
-                        {result.score === null ? 'FAIL' : (result.score > 0 ? '+' : '') + result.score}
+                      <td style={{ ...tdStyle, fontWeight: 600, color }}>{result.pctCombined}%</td>
+                      <td style={tdStyle}>
+                        <span style={{
+                          fontFamily: FONT, fontSize: 10, fontWeight: 600,
+                          padding: '2px 7px', borderRadius: 2, color,
+                        }}>{result.label}</span>
                       </td>
                       <td style={tdStyle}>
                         <div style={{ display: 'flex', gap: 4 }}>
@@ -172,7 +168,7 @@ export default function LogManager({ history, onUpdateHistory, onClose }) {
                           ) : (
                             <>
                               <button onClick={() => startEdit(s)} style={actionBtn(COLORS.amber)}>EDIT</button>
-                              <button onClick={() => deleteSample(s.id)} style={actionBtn('#ff6b5b')}>DEL</button>
+                              <button onClick={() => deleteSample(s.id)} style={actionBtn(COLORS.red)}>DEL</button>
                             </>
                           )}
                         </div>

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { COLORS, FONT } from '../constants'
 
 export default function Header({
-  onOpenCamera, onResetZones, onShowAccuracy, onShowLogs,
+  onOpenCamera, onResetZones, onShowAccuracy, onShowLogs, onShowReceipts, onShowPackLog, onShowPackCodes,
   trainingMode, onToggleTraining,
   relayConnected, phonesOnline
 }) {
@@ -54,6 +54,36 @@ export default function Header({
           letterSpacing: '0.06em',
         }}>
           TRAINING {trainingMode ? 'ON' : 'OFF'}
+        </button>
+
+        {/* Pack Codes */}
+        <button onClick={onShowPackCodes} style={{
+          fontFamily: FONT, fontSize: 10, color: COLORS.text3,
+          background: 'transparent', border: `1px solid ${COLORS.border}`,
+          padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
+          letterSpacing: '0.06em',
+        }}>
+          PACK CODES
+        </button>
+
+        {/* Receipts */}
+        <button onClick={onShowReceipts} style={{
+          fontFamily: FONT, fontSize: 10, color: COLORS.amber,
+          background: 'transparent', border: `1px solid ${COLORS.amberDim}`,
+          padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
+          letterSpacing: '0.06em',
+        }}>
+          RECEIPTS
+        </button>
+
+        {/* Pack Log */}
+        <button onClick={onShowPackLog} style={{
+          fontFamily: FONT, fontSize: 10, color: COLORS.text3,
+          background: 'transparent', border: `1px solid ${COLORS.border}`,
+          padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
+          letterSpacing: '0.06em',
+        }}>
+          PACK LOG
         </button>
 
         {/* Logs */}
