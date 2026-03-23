@@ -229,7 +229,7 @@ export default function DumpScanner() {
             }}>
               {lastScan.stats.remaining === 0
                 ? 'RECEIPT COMPLETE'
-                : `${lastScan.stats.remaining} pallets remaining`
+                : `${lastScan.stats.remaining} raw pallets remaining`
               }
             </div>
 
@@ -272,7 +272,7 @@ export default function DumpScanner() {
             lineHeight: 1.6,
           }}>
             Point camera at the QR code on the barcode sheet.
-            One scan per pallet dumped.
+            One scan per raw pallet dumped.
           </div>
         )}
       </div>

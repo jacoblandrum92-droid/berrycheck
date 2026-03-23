@@ -28,12 +28,6 @@ export default function ThresholdBars({ counts }) {
           padding: 28, textAlign: 'center',
           fontFamily: FONT, fontSize: 11, color: COLORS.text3, letterSpacing: '0.06em',
         }}>Log a sample to see grade analysis</div>
-      ) : result.headrooms.length === 0 ? (
-        <div style={{
-          padding: 20, textAlign: 'center',
-          fontFamily: FONT, fontSize: 12, color: COLORS.red,
-          letterSpacing: '0.06em', fontWeight: 600,
-        }}>POOR — exceeds all grade thresholds</div>
       ) : (
         result.headrooms.map(h => {
           const maxBar = h.limit * 2 || 1

@@ -299,14 +299,10 @@ export function gradeSample(counts) {
   // because going OVER that limit is what drops you
   const headrooms = []
 
-  // For each grade, show how close you are to exceeding that grade's limits
-  // Excellent: show distance to excellent limits (going over = drop to good)
-  // Good: show distance to good limits (going over = drop to fair)
-  // Fair: show distance to fair limits (going over = drop to poor)
-  // Poor: no headroom (already at bottom)
-  const gradeForLimits = grade // use current grade's limits
+  // Always show headroom — use current grade's limits, or Fair limits for Poor
+  const gradeForLimits = grade === 'poor' ? 'fair' : grade === 'none' ? 'excellent' : grade
 
-  if (grade !== 'poor' && grade !== 'none') {
+  if (grade !== 'none') {
     const permLimit = tol.permanent.totalMax[gradeForLimits]
     const condLimit = tol.condition.totalMax[gradeForLimits]
     const combLimit = tol.combinedMax[gradeForLimits]
@@ -336,19 +332,16 @@ export function gradeSample(counts) {
       type: 'combined',
     })
 
-    if (grade !== 'excellent') {
-      const decayLimit = tol.condition.decay[gradeForLimits]
-      if (decayLimit > 0) {
-        headrooms.push({
-          name: 'Decay',
-          pct: round1(pctDecay),
-          limit: decayLimit,
-          remaining: round1(decayLimit - pctDecay),
-          count: decayTotal,
-          type: 'decay',
-        })
-      }
-    }
+    // Decay — show for all grades. For Excellent, limit is 0 (any decay = downgrade)
+    const decayLimit = grade === 'excellent' ? 0 : tol.condition.decay[gradeForLimits] || 0
+    headrooms.push({
+      name: 'Decay',
+      pct: round1(pctDecay),
+      limit: decayLimit || 0.01, // avoid division by zero in score calc
+      remaining: round1((decayLimit || 0) - pctDecay),
+      count: decayTotal,
+      type: 'decay',
+    })
   }
 
   // Bottleneck — which category is tightest (closest to dropping)

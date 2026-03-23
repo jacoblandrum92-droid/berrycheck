@@ -69,13 +69,13 @@ export default function LineMonitor() {
         gap: 10, marginBottom: 16,
       }}>
         {statBox(
-          'Cooler Inventory',
+          'Raw Fruit in Cooler',
           cooler.totalRemainingLbs > 0 ? cooler.totalRemainingLbs.toLocaleString() : '0',
-          'lbs remaining',
+          'raw lbs remaining',
           cooler.totalRemainingLbs > 0 ? COLORS.amber : COLORS.green
         )}
         {statBox(
-          'Pallets Remaining',
+          'Raw Pallets Left',
           cooler.totalRemainingPallets,
           `of ${cooler.totalExpectedPallets} total`,
           cooler.totalRemainingPallets > 0 ? COLORS.text : COLORS.green
@@ -112,7 +112,7 @@ export default function LineMonitor() {
             fontFamily: FONT, fontSize: 11, color: COLORS.amber,
           }}>
             FIFO: {oldestUnstarted.receiptNum} ({oldestUnstarted.grower}) has been waiting {age}+ hours
-            — {oldestUnstarted.stats.remaining} pallets not yet started
+            — {oldestUnstarted.stats.remaining} raw pallets not yet started
           </div>
         )
       })()}

@@ -47,10 +47,12 @@ export default function SampleHistory({ history, onClear }) {
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr>
+              <th style={thStyle}>#</th>
               <th style={thStyle}>Time</th>
               <th style={thStyle}>Type</th>
-              <th style={thStyle}>Pallet</th>
+              <th style={thStyle}>Tag</th>
               <th style={thStyle}>Receipt</th>
+              <th style={thStyle}>Grower</th>
               <th style={thStyle}>Total</th>
               <th style={thStyle}>Perm</th>
               <th style={thStyle}>Cond</th>
@@ -62,7 +64,7 @@ export default function SampleHistory({ history, onClear }) {
           <tbody>
             {history.length === 0 ? (
               <tr>
-                <td colSpan={10} style={{ ...tdStyle, textAlign: 'center', padding: 28, color: COLORS.text3 }}>
+                <td colSpan={12} style={{ ...tdStyle, textAlign: 'center', padding: 28, color: COLORS.text3 }}>
                   No samples logged yet
                 </td>
               </tr>
@@ -77,6 +79,7 @@ export default function SampleHistory({ history, onClear }) {
                     borderBottom: `1px solid ${COLORS.border}`,
                     opacity: s.isExtra ? 0.6 : 1,
                   }}>
+                    <td style={{ ...tdStyle, fontWeight: 700, color: COLORS.green }}>{s.dailyPalletNum || '—'}</td>
                     <td style={tdStyle}>{s.time}</td>
                     <td style={tdStyle}>
                       {s.isExtra ? (
@@ -89,6 +92,7 @@ export default function SampleHistory({ history, onClear }) {
                     </td>
                     <td style={{ ...tdStyle, color: COLORS.text }}>{s.lotId || '—'}</td>
                     <td style={tdStyle}>{s.receiptNum || '—'}</td>
+                    <td style={tdStyle}>{s.grower || '—'}</td>
                     <td style={tdStyle}>{result.total}</td>
                     <td style={tdStyle}>{s.permanent || 0}</td>
                     <td style={tdStyle}>{s.condition || 0}</td>

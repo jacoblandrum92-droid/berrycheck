@@ -16,10 +16,10 @@ const labelStyle = {
 }
 
 export default function QCSetupBar({
-  lotId, setLotId, receiptNum, setReceiptNum,
+  dailyPalletNum, lotId, setLotId, receiptNum, setReceiptNum,
   grower, setGrower, variety, setVariety,
   packCriteria, setPackCriteria,
-  history, skipLayer, skipPallet,
+  history, skipLayer, skipPallet, onReceiptChange, palletReceipts,
 }) {
   const [activeReceipts, setActiveReceipts] = useState([])
 
@@ -57,6 +57,17 @@ export default function QCSetupBar({
       padding: '10px 32px',
       display: 'flex', alignItems: 'flex-end', gap: 16,
     }}>
+      {/* Daily pallet number */}
+      <div style={{ textAlign: 'center', minWidth: 50 }}>
+        <label style={labelStyle}>Pallet</label>
+        <div style={{
+          fontFamily: FONT, fontSize: 22, fontWeight: 800,
+          color: COLORS.green, lineHeight: 1,
+        }}>
+          #{dailyPalletNum}
+        </div>
+      </div>
+
       {/* Receipt */}
       <div style={{ minWidth: 200 }}>
         <label style={labelStyle}>Receipt</label>
@@ -129,6 +140,19 @@ export default function QCSetupBar({
       {/* Spacer */}
       <div style={{ flex: 1 }} />
 
+      {/* Receipt change button */}
+      {lotId && (
+        <button onClick={onReceiptChange} style={{
+          fontFamily: FONT, fontSize: 9, fontWeight: 600,
+          color: COLORS.amber, background: COLORS.amberDim,
+          border: `1px solid ${COLORS.amber}`,
+          padding: '5px 10px', borderRadius: 3, cursor: 'pointer',
+          letterSpacing: '0.04em', whiteSpace: 'nowrap', alignSelf: 'flex-end',
+        }}>
+          ADD RECEIPT TO PALLET
+        </button>
+      )}
+
       {/* Layer indicator */}
       {lotId && (
         <div style={{
@@ -138,6 +162,9 @@ export default function QCSetupBar({
           <div>
             <div style={{ color: COLORS.text3, fontSize: 9, letterSpacing: '0.06em' }}>
               {lotId}: {officialCount}/3{extraCount > 0 ? ` +${extraCount}` : ''}
+              {palletReceipts && palletReceipts.length > 0 && (
+                <span style={{ color: COLORS.amber }}> · {palletReceipts.length + 1} receipts</span>
+              )}
             </div>
             {officialCount < 3 ? (
               <div style={{ color: COLORS.green, fontWeight: 600, fontSize: 12 }}>

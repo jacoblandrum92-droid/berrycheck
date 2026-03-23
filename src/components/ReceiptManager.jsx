@@ -25,7 +25,7 @@ export default function ReceiptManager({ onClose, onPrint }) {
 
   const handleSave = () => {
     if (!form.receiptNum.trim() && !form.grower.trim()) return alert('Receipt number or grower is required')
-    if (!form.expectedPallets || Number(form.expectedPallets) < 1) return alert('Expected pallets is required')
+    if (!form.expectedPallets || Number(form.expectedPallets) < 1) return alert('Raw pallet count is required')
 
     if (editId) {
       updateReceipt(editId, {
@@ -190,16 +190,16 @@ export default function ReceiptManager({ onClose, onPrint }) {
                 />
               </div>
               <div>
-                <label style={labelStyle}>Expected Pallets *</label>
+                <label style={labelStyle}>Raw Pallets *</label>
                 <input
                   type="number" min="1" style={inputStyle}
                   value={form.expectedPallets}
                   onChange={e => setForm({ ...form, expectedPallets: e.target.value })}
-                  placeholder="# of pallets"
+                  placeholder="# of raw pallets"
                 />
               </div>
               <div>
-                <label style={labelStyle}>Expected Lbs</label>
+                <label style={labelStyle}>Raw Lbs</label>
                 <input
                   type="number" min="0" style={inputStyle}
                   value={form.expectedLbs}
@@ -290,7 +290,7 @@ export default function ReceiptManager({ onClose, onPrint }) {
                         <span style={{
                           fontFamily: FONT, fontSize: 11, color: COLORS.text3,
                         }}>
-                          / {r.expectedPallets} pallets
+                          / {r.expectedPallets} raw
                         </span>
                       </div>
                       {/* Progress bar */}
@@ -312,7 +312,7 @@ export default function ReceiptManager({ onClose, onPrint }) {
                       <div style={{
                         fontFamily: FONT, fontSize: 11, color: COLORS.text,
                       }}>
-                        {stats.lbsRemaining.toLocaleString()} lbs
+                        {stats.lbsRemaining.toLocaleString()} raw lbs
                       </div>
                       {stats.lbsPerHour > 0 && (
                         <div style={{

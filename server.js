@@ -72,6 +72,76 @@ function broadcast(msg, targetRole) {
   }
 }
 
+// --- Local IP endpoint ---
+import { networkInterfaces } from 'os'
+
+function getLocalIP() {
+  const nets = networkInterfaces()
+  for (const name of Object.keys(nets)) {
+    for (const net of nets[name]) {
+      if (net.family === 'IPv4' && !net.internal) return net.address
+    }
+  }
+  return 'localhost'
+}
+
+app.get('/api/ip', (req, res) => {
+  res.json({ ip: getLocalIP(), port: PORT })
+})
+
+// --- Snapshot sharing ---
+// App posts a data snapshot, gets back an ID. Viewer fetches by ID.
+const snapshots = new Map()
+
+app.use(express.json({ limit: '2mb' }))
+
+app.post('/api/share', (req, res) => {
+  const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 5)
+  const snapshot = {
+    ...req.body,
+    createdAt: new Date().toISOString(),
+    id,
+  }
+  snapshots.set(id, snapshot)
+  // Clean up old snapshots (keep last 50)
+  if (snapshots.size > 50) {
+    const oldest = snapshots.keys().next().value
+    snapshots.delete(oldest)
+  }
+  res.json({ id, url: `http://${getLocalIP()}:${PORT}/?mode=view&id=${id}` })
+})
+
+app.get('/api/share/:id', (req, res) => {
+  const snapshot = snapshots.get(req.params.id)
+  if (!snapshot) return res.status(404).json({ error: 'Snapshot expired or not found' })
+  res.json(snapshot)
+})
+
+// Daily summary — stores day summaries for archive access
+const dailySummaries = new Map()
+
+app.post('/api/daily', (req, res) => {
+  const { date, data } = req.body
+  dailySummaries.set(date, { ...data, date, updatedAt: new Date().toISOString() })
+  // Keep last 90 days
+  if (dailySummaries.size > 90) {
+    const oldest = dailySummaries.keys().next().value
+    dailySummaries.delete(oldest)
+  }
+  res.json({ ok: true })
+})
+
+app.get('/api/daily/:date', (req, res) => {
+  const summary = dailySummaries.get(req.params.date)
+  if (!summary) return res.status(404).json({ error: 'No data for this date' })
+  res.json(summary)
+})
+
+app.get('/api/daily', (req, res) => {
+  const dates = [...dailySummaries.keys()].sort().reverse()
+  res.json(dates)
+})
+
 // --- HTTP serving ---
 const distPath = join(__dirname, 'dist')
 const VITE_PORT = 5176

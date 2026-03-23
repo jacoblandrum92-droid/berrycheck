@@ -78,47 +78,34 @@ export default function LotSummary({ lotId, history }) {
           }}>
             Sample Breakdown
           </div>
-          <div style={{ display: 'flex', gap: 6 }}>
-            {[1, 2, 3].map(num => {
-              const sample = official.find(s => s.sampleNum === num)
-              const skipped = lotSamples.find(s => s.sampleNum === num && s.isSkipped)
+          {/* Chronological sample timeline — officials and extras interleaved */}
+          <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+            {lotSamples.map((s) => {
               const layerNames = { 1: 'BTM', 2: 'MID', 3: 'TOP' }
 
-              if (skipped) {
-                return <SampleChip key={num} label={`#${num} ${layerNames[num]}`}
-                  value="SKIP" color={COLORS.text3} dimmed />
-              }
-              if (!sample) {
-                return <SampleChip key={num} label={`#${num} ${layerNames[num]}`}
-                  value="—" color={COLORS.text3} dimmed />
+              if (s.isSkipped) {
+                return <SampleChip key={s.id}
+                  label={s.sampleNum ? `#${s.sampleNum} ${layerNames[s.sampleNum]}` : 'SKIP'}
+                  value={s.isMissed ? 'MISS' : 'SKIP'} color={COLORS.text3} dimmed />
               }
 
-              const result = gradeSample(sample)
+              const result = gradeSample(s)
               const color = GRADE_COLORS[result.status] || COLORS.text3
+              const isExtra = s.isExtra
+              const label = isExtra ? 'EXTRA' : `#${s.sampleNum} ${layerNames[s.sampleNum] || ''}`
+              const receiptLabel = s.receiptNum ? s.receiptNum : ''
 
               return (
-                <SampleChip key={num} label={`#${num} ${layerNames[num]}`}
+                <SampleChip key={s.id}
+                  label={label}
                   value={result.label || '—'}
                   color={color}
-                  detail={`P:${sample.permanent || 0} C:${sample.condition || 0} D:${sample.decay || 0}`}
+                  detail={`${receiptLabel}${receiptLabel ? ' · ' : ''}P:${s.permanent || 0} C:${s.condition || 0} D:${s.decay || 0}`}
+                  extra={isExtra}
                 />
               )
             })}
           </div>
-
-          {extras.length > 0 && (
-            <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-              {extras.map((s, i) => {
-                const result = gradeSample(s)
-                const color = GRADE_COLORS[result.status] || COLORS.text3
-                return (
-                  <SampleChip key={s.id} label={`EX${i + 1}`}
-                    value={result.label || '—'}
-                    color={color} extra />
-                )
-              })}
-            </div>
-          )}
         </div>
       )}
     </div>

@@ -19,6 +19,8 @@ export function PackLogInput({ receiptNum, grower }) {
   const [boxes, setBoxes] = useState('')
   const [palletNum, setPalletNum] = useState('')
   const [flash, setFlash] = useState(false)
+  const [showPalletRef, setShowPalletRef] = useState(false)
+  const [recentEntries, setRecentEntries] = useState([])
   const [todayCount, setTodayCount] = useState(() => {
     const today = new Date().toLocaleDateString()
     const log = loadPackLog()
@@ -67,6 +69,7 @@ export function PackLogInput({ receiptNum, grower }) {
     log.push(entry)
     savePackLog(log)
 
+    setRecentEntries(prev => [...prev, entry].slice(-5)) // keep last 5
     setBoxes('')
     setTodayCount(dailyPallet)
     setFlash(true)
@@ -143,19 +146,42 @@ export function PackLogInput({ receiptNum, grower }) {
       </div>
 
       {/* Boxes */}
-      <div>
-        <div style={{ fontFamily: FONT, fontSize: 8, color: COLORS.text3, letterSpacing: '0.06em', marginBottom: 2 }}>
-          BOXES
-        </div>
-        <input
-          type="number" min="1"
-          style={{ ...inputStyle, width: 70 }}
-          value={boxes}
-          onChange={e => setBoxes(e.target.value)}
-          placeholder="0"
-          onKeyDown={e => e.key === 'Enter' && logEntry()}
-        />
-      </div>
+      {(() => {
+        const selectedPack = packCodeDB.find(c => c.code === packCode)
+        const maxBoxes = selectedPack ? selectedPack.perPallet : null
+        const boxCount = parseInt(boxes) || 0
+        const isOver = maxBoxes && boxCount > maxBoxes
+
+        return (
+          <div>
+            <div style={{
+              fontFamily: FONT, fontSize: 8, color: isOver ? COLORS.red : COLORS.text3,
+              letterSpacing: '0.06em', marginBottom: 2,
+              display: 'flex', alignItems: 'center', gap: 4,
+            }}>
+              BOXES {maxBoxes ? `(/${maxBoxes})` : ''}
+              <span onClick={(e) => { e.stopPropagation(); setShowPalletRef(true) }} style={{
+                cursor: 'pointer', color: COLORS.amber,
+                fontWeight: 700, fontSize: 11,
+                padding: '0 4px', border: `1px solid ${COLORS.amberDim}`,
+                borderRadius: 3, lineHeight: '14px',
+              }} title="Pallet quantities reference">?</span>
+            </div>
+            <input
+              type="number" min="1"
+              style={{
+                ...inputStyle, width: 70,
+                borderColor: isOver ? COLORS.red : COLORS.border2,
+                color: isOver ? COLORS.red : COLORS.text,
+              }}
+              value={boxes}
+              onChange={e => setBoxes(e.target.value)}
+              placeholder="0"
+              onKeyDown={e => e.key === 'Enter' && logEntry()}
+            />
+          </div>
+        )
+      })()}
 
       <button onClick={logEntry} style={{
         fontFamily: FONT, fontSize: 10, fontWeight: 600,
@@ -178,6 +204,80 @@ export function PackLogInput({ receiptNum, grower }) {
         </div>
         <div style={{ fontSize: 8 }}>pallets</div>
       </div>
+
+      {/* Recent entries confirmation */}
+      {recentEntries.length > 0 && (
+        <div style={{
+          display: 'flex', gap: 6, marginLeft: 8,
+          alignItems: 'center', overflow: 'hidden', flex: 1,
+        }}>
+          {recentEntries.map(e => (
+            <div key={e.id} style={{
+              fontFamily: FONT, fontSize: 9, color: COLORS.green,
+              background: COLORS.greenDim, border: `1px solid ${COLORS.green}30`,
+              padding: '3px 8px', borderRadius: 3, whiteSpace: 'nowrap',
+            }}>
+              #{e.dailyPallet} · {e.packCode} · {e.receiptNum || '—'} · {e.boxes}bx
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Pallet quantity reference popup */}
+      {showPalletRef && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 2000,
+          background: 'rgba(0,0,0,0.4)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }} onClick={() => setShowPalletRef(false)}>
+          <div style={{
+            background: '#fff', borderRadius: 8, padding: 20,
+            maxWidth: 400, maxHeight: '70vh', overflowY: 'auto',
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{
+              fontFamily: FONT, fontSize: 13, fontWeight: 700,
+              color: COLORS.text, marginBottom: 12,
+            }}>
+              Boxes Per Full Pallet
+            </div>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr>
+                  <th style={refTh}>Qty</th>
+                  <th style={refTh}>Pack Size</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[
+                  { qty: 240, desc: '6oz (12-pack)' },
+                  { qty: 144, desc: 'Pint, 11oz, 18oz (8-pack), 4x2lb' },
+                  { qty: 100, desc: '18oz (12-pack), 16oz' },
+                  { qty: 75, desc: 'Bulk lugs (RTE/MBG)' },
+                  { qty: 60, desc: '18oz (18-pack), 24oz (12-pack)' },
+                  { qty: 50, desc: '2lb (12-pack), 24oz (18-pack)' },
+                ].map(r => (
+                  <tr key={r.qty} style={{ borderBottom: `1px solid ${COLORS.border}` }}>
+                    <td style={{
+                      fontFamily: FONT, fontSize: 16, fontWeight: 700,
+                      color: COLORS.green, padding: '8px 12px', textAlign: 'center',
+                    }}>{r.qty}</td>
+                    <td style={{
+                      fontFamily: FONT, fontSize: 11, color: COLORS.text2,
+                      padding: '8px 12px',
+                    }}>{r.desc}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <button onClick={() => setShowPalletRef(false)} style={{
+              fontFamily: FONT, fontSize: 11, color: COLORS.text3,
+              background: 'transparent', border: `1px solid ${COLORS.border}`,
+              padding: '6px 16px', borderRadius: 4, cursor: 'pointer',
+              marginTop: 12, width: '100%',
+            }}>CLOSE</button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
