@@ -3,7 +3,7 @@ import QRCode from 'qrcode'
 import { COLORS, FONT } from '../constants'
 
 export default function Header({
-  onOpenCamera, onResetZones, onShowAccuracy, onShowLogs, onShowReceipts, onShowPackLog, onShowPackCodes, onShowBackupForm, onShowPackout, onShowDCReconcile,
+  onOpenCamera, onResetZones, onShowAccuracy, onShowLogs, onShowReceipts, onShowPackLog, onShowPackCodes, onShowBackupForm, onShowPackout, onShowDCReconcile, onShowPrePack, onShowFeatures, features = {},
   trainingMode, onToggleTraining,
   relayConnected, phonesOnline
 }) {
@@ -55,33 +55,47 @@ export default function Header({
           </div>
         </div>
 
-        {/* Dev seed data */}
-        <button onClick={async () => {
-          if (!confirm('Replace all QC history and pack log with demo data?')) return
-          const { seed } = await import('../seedData.js')
-          const result = seed()
-          alert(`Seeded ${result.samples} samples, ${result.pallets} pallets. Reloading...`)
-          window.location.reload()
-        }} style={{
-          fontFamily: FONT, fontSize: 9, color: COLORS.purple,
-          background: 'transparent', border: `1px dashed ${COLORS.purple}40`,
-          padding: '4px 8px', borderRadius: 3, cursor: 'pointer',
-          letterSpacing: '0.06em',
-        }}>
-          DEV: SEED DATA
-        </button>
-
-        {/* Training mode toggle */}
-        <button onClick={onToggleTraining} style={{
-          fontFamily: FONT, fontSize: 10,
-          color: trainingMode ? COLORS.green : COLORS.text3,
-          background: trainingMode ? COLORS.greenDim + '40' : 'transparent',
-          border: `1px solid ${trainingMode ? COLORS.greenDim : COLORS.border}`,
+        {/* Features toggle */}
+        <button onClick={onShowFeatures} style={{
+          fontFamily: FONT, fontSize: 10, color: COLORS.purple,
+          background: 'transparent', border: `1px solid ${COLORS.purple}40`,
           padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
           letterSpacing: '0.06em',
         }}>
-          TRAINING {trainingMode ? 'ON' : 'OFF'}
+          FEATURES
         </button>
+
+        {/* Dev seed data */}
+        {features.seedData !== false && (
+          <button onClick={async () => {
+            if (!confirm('Replace all QC history and pack log with demo data?')) return
+            const { seed } = await import('../seedData.js')
+            const result = seed()
+            alert(`Seeded ${result.samples} samples, ${result.pallets} pallets. Reloading...`)
+            window.location.reload()
+          }} style={{
+            fontFamily: FONT, fontSize: 9, color: COLORS.purple,
+            background: 'transparent', border: `1px dashed ${COLORS.purple}40`,
+            padding: '4px 8px', borderRadius: 3, cursor: 'pointer',
+            letterSpacing: '0.06em',
+          }}>
+            DEV: SEED
+          </button>
+        )}
+
+        {/* Training mode toggle */}
+        {features.training !== false && (
+          <button onClick={onToggleTraining} style={{
+            fontFamily: FONT, fontSize: 10,
+            color: trainingMode ? COLORS.green : COLORS.text3,
+            background: trainingMode ? COLORS.greenDim + '40' : 'transparent',
+            border: `1px solid ${trainingMode ? COLORS.greenDim : COLORS.border}`,
+            padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
+            letterSpacing: '0.06em',
+          }}>
+            TRAINING {trainingMode ? 'ON' : 'OFF'}
+          </button>
+        )}
 
         {/* Pack Codes */}
         <button onClick={onShowPackCodes} style={{
@@ -93,55 +107,70 @@ export default function Header({
           PACK CODES
         </button>
 
-        {/* Receipts */}
-        <button onClick={onShowReceipts} style={{
-          fontFamily: FONT, fontSize: 10, color: COLORS.amber,
-          background: 'transparent', border: `1px solid ${COLORS.amberDim}`,
-          padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
-          letterSpacing: '0.06em',
-        }}>
-          RECEIPTS
-        </button>
-
-        {/* Pack Log */}
-        <button onClick={onShowPackLog} style={{
-          fontFamily: FONT, fontSize: 10, color: COLORS.text3,
-          background: 'transparent', border: `1px solid ${COLORS.border}`,
-          padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
-          letterSpacing: '0.06em',
-        }}>
-          PACK LOG
-        </button>
-
-        {/* Packout Report */}
-        <button onClick={onShowPackout} style={{
+        {/* Pre-Pack Notes */}
+        <button onClick={onShowPrePack} style={{
           fontFamily: FONT, fontSize: 10, color: COLORS.green,
           background: 'transparent', border: `1px solid ${COLORS.greenDim}`,
           padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
           letterSpacing: '0.06em',
         }}>
-          PACKOUT
+          PRE-PACK
         </button>
 
-        {/* DC Reconciliation */}
-        <button onClick={onShowDCReconcile} style={{
-          fontFamily: FONT, fontSize: 10, color: COLORS.amber,
-          background: 'transparent', border: `1px solid ${COLORS.amberDim}`,
-          padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
-          letterSpacing: '0.06em',
-        }}>
-          DC RECON
-        </button>
+        {features.receipts !== false && (
+          <button onClick={onShowReceipts} style={{
+            fontFamily: FONT, fontSize: 10, color: COLORS.amber,
+            background: 'transparent', border: `1px solid ${COLORS.amberDim}`,
+            padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
+            letterSpacing: '0.06em',
+          }}>
+            RECEIPTS
+          </button>
+        )}
 
-        {/* Logs */}
-        <button onClick={onShowLogs} style={{
-          fontFamily: FONT, fontSize: 10, color: COLORS.text3,
-          background: 'transparent', border: `1px solid ${COLORS.border}`,
-          padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
-          letterSpacing: '0.06em',
-        }}>
-          LOGS
-        </button>
+        {features.packLog !== false && (
+          <button onClick={onShowPackLog} style={{
+            fontFamily: FONT, fontSize: 10, color: COLORS.text3,
+            background: 'transparent', border: `1px solid ${COLORS.border}`,
+            padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
+            letterSpacing: '0.06em',
+          }}>
+            PACK LOG
+          </button>
+        )}
+
+        {features.packout !== false && (
+          <button onClick={onShowPackout} style={{
+            fontFamily: FONT, fontSize: 10, color: COLORS.green,
+            background: 'transparent', border: `1px solid ${COLORS.greenDim}`,
+            padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
+            letterSpacing: '0.06em',
+          }}>
+            PACKOUT
+          </button>
+        )}
+
+        {features.dcReconcile !== false && (
+          <button onClick={onShowDCReconcile} style={{
+            fontFamily: FONT, fontSize: 10, color: COLORS.amber,
+            background: 'transparent', border: `1px solid ${COLORS.amberDim}`,
+            padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
+            letterSpacing: '0.06em',
+          }}>
+            DC RECON
+          </button>
+        )}
+
+        {features.logManager !== false && (
+          <button onClick={onShowLogs} style={{
+            fontFamily: FONT, fontSize: 10, color: COLORS.text3,
+            background: 'transparent', border: `1px solid ${COLORS.border}`,
+            padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
+            letterSpacing: '0.06em',
+          }}>
+            LOGS
+          </button>
+        )}
 
         {/* Accuracy report */}
         <button onClick={onShowAccuracy} style={{

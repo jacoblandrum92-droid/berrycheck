@@ -111,3 +111,32 @@ export function deletePackCode(codeId) {
   const codes = loadPackCodes().filter(c => c.code !== codeId)
   savePackCodes(codes)
 }
+
+// Favorites — the ~8 codes this shed actually uses
+const FAVORITES_KEY = 'bc_packcodes_favorites'
+
+export function loadFavorites() {
+  try { return JSON.parse(localStorage.getItem(FAVORITES_KEY) || '[]') } catch { return [] }
+}
+
+export function saveFavorites(codes) {
+  localStorage.setItem(FAVORITES_KEY, JSON.stringify(codes))
+}
+
+export function toggleFavorite(code) {
+  const favs = loadFavorites()
+  if (favs.includes(code)) {
+    saveFavorites(favs.filter(c => c !== code))
+  } else {
+    saveFavorites([...favs, code])
+  }
+}
+
+// Load pack codes with favorites first, then the rest
+export function loadPackCodesGrouped() {
+  const all = loadPackCodes()
+  const favs = loadFavorites()
+  const favorites = all.filter(c => favs.includes(c.code))
+  const rest = all.filter(c => !favs.includes(c.code))
+  return { favorites, rest, all }
+}

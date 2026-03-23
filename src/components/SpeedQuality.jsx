@@ -191,6 +191,9 @@ export default function SpeedQuality({ history, growerFilter }) {
               </div>
             )
           })()}
+
+          {/* Line Optimizer — actionable guidance */}
+          <LineOptimizer paired={paired} growerFilter={growerFilter} />
         </>
       )}
     </div>
@@ -279,4 +282,229 @@ function avg(arr) {
 
 function round1(n) {
   return Math.round(n * 10) / 10
+}
+
+/**
+ * Line Optimizer — turns the speed/quality data into a recommendation.
+ *
+ * Logic:
+ * 1. Get DC strictness level → maps to a defect % ceiling
+ * 2. Look at this grower's pallets sorted by speed
+ * 3. Find the fastest speed where grade held within DC tolerance
+ * 4. Look at the last 3 pallets for trend (getting worse = early warning)
+ * 5. Recommend: push, hold, or slow down
+ */
+function LineOptimizer({ paired, growerFilter }) {
+  if (paired.length < 3) return null
+
+  // DC strictness → approximate combined defect ceiling
+  let dcLevel = 3
+  try { dcLevel = parseInt(localStorage.getItem('bc_dc_strictness') || '3') } catch {}
+
+  // DC tolerance ceiling — what % combined defects the DC will accept
+  // These are rough estimates based on DC strictness level
+  const dcCeiling = { 1: 14, 2: 12, 3: 10, 4: 8, 5: 6 }[dcLevel] || 10
+  const dcLabel = { 1: 'Very Loose', 2: 'Loose', 3: 'Normal', 4: 'Strict', 5: 'Very Strict' }[dcLevel]
+
+  const withRate = paired.filter(p => p.lineRate && p.pctCombined != null)
+  if (withRate.length < 3) return null
+
+  // Current state — last pallet
+  const latest = withRate[withRate.length - 1]
+  const currentRate = latest.lineRate
+  const currentDefect = latest.pctCombined
+  const headroom = round1(dcCeiling - currentDefect)
+
+  // Recent trend — last 3 pallets
+  const recent = withRate.slice(-3)
+  const recentDefects = recent.map(p => p.pctCombined)
+  const trending = recentDefects[2] - recentDefects[0]
+  const trendDir = trending > 1.5 ? 'worse' : trending < -1.5 ? 'better' : 'stable'
+
+  // Find the speed sweet spot for this grower
+  // Sort by speed, find the fastest pallet that stayed under ceiling
+  const sorted = [...withRate].sort((a, b) => a.lineRate - b.lineRate)
+  const underCeiling = sorted.filter(p => p.pctCombined <= dcCeiling)
+  const maxSafeRate = underCeiling.length > 0 ? Math.max(...underCeiling.map(p => p.lineRate)) : null
+  const overCeiling = sorted.filter(p => p.pctCombined > dcCeiling)
+  const minDangerRate = overCeiling.length > 0 ? Math.min(...overCeiling.map(p => p.lineRate)) : null
+
+  // Blowoff analysis
+  const withBlowoff = paired.filter(p => p.blowoff != null && p.pctCombined != null)
+  const avgBlowoff = withBlowoff.length > 0 ? round1(avg(withBlowoff.map(p => p.blowoff))) : null
+
+  // Build recommendation
+  let action, actionColor, actionDetail
+
+  if (currentDefect > dcCeiling) {
+    // Over the line
+    action = 'SLOW DOWN'
+    actionColor = COLORS.red
+    const safeRate = maxSafeRate ? Math.round(maxSafeRate) : Math.round(currentRate * 0.85)
+    actionDetail = `You're ${round1(currentDefect - dcCeiling)}% over the DC ceiling. `
+    if (maxSafeRate) {
+      actionDetail += `This grower's fruit held under ${dcCeiling}% up to ${safeRate} lbs/hr. Drop to that range.`
+    } else {
+      actionDetail += `No safe speed found for this fruit today — consider increasing blowoff or diverting.`
+    }
+    if (avgBlowoff != null && avgBlowoff < 10) {
+      actionDetail += ` Blowoff is at ${avgBlowoff}% — you have room to increase it before slowing the line.`
+    }
+  } else if (headroom <= 2) {
+    // Close to the line
+    action = 'HOLD'
+    actionColor = COLORS.amber
+    actionDetail = `Only ${headroom}% headroom to DC ceiling. `
+    if (trendDir === 'worse') {
+      actionDetail += `Trending worse over last 3 pallets (+${round1(trending)}%). If this continues you'll breach. Consider slowing 50-100 lbs/hr.`
+    } else {
+      actionDetail += `Holding steady. Don't push faster — you're right at the edge.`
+    }
+  } else if (headroom > 2 && trendDir === 'worse') {
+    // Have room but trending wrong way
+    action = 'WATCH'
+    actionColor = COLORS.amber
+    actionDetail = `${headroom}% headroom but trending worse (+${round1(trending)}% over last 3 pallets). `
+    actionDetail += `You have room but the trend is going the wrong direction. Hold current speed and see if it stabilizes.`
+  } else {
+    // Have room, trend is stable or improving
+    action = 'PUSH'
+    actionColor = COLORS.green
+    if (maxSafeRate && maxSafeRate > currentRate + 50) {
+      actionDetail = `${headroom}% headroom. This grower's fruit has held up to ${Math.round(maxSafeRate)} lbs/hr today. `
+      actionDetail += `You can push ~${Math.round(maxSafeRate - currentRate)} lbs/hr faster.`
+    } else if (headroom > 5) {
+      actionDetail = `${headroom}% headroom and trend is ${trendDir}. Room to push ~100 lbs/hr and see what happens.`
+    } else {
+      actionDetail = `${headroom}% headroom, trend is stable. Modest room to push — try 50 lbs/hr increments.`
+    }
+    if (avgBlowoff != null && avgBlowoff > 10) {
+      actionDetail += ` Blowoff is high at ${avgBlowoff}% — consider reducing it to improve packout while you push speed.`
+    }
+  }
+
+  return (
+    <div style={{
+      marginTop: 14, borderRadius: 6, overflow: 'hidden',
+      border: `2px solid ${actionColor}`,
+    }}>
+      {/* Action banner */}
+      <div style={{
+        background: actionColor, padding: '10px 16px',
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+      }}>
+        <div style={{
+          fontFamily: FONT, fontSize: 16, fontWeight: 800,
+          color: '#fff', letterSpacing: '0.1em',
+        }}>
+          {action}
+        </div>
+        <div style={{
+          fontFamily: FONT, fontSize: 11, color: '#fff', opacity: 0.9,
+        }}>
+          {growerFilter || 'All growers'} · DC: {dcLabel} (≤{dcCeiling}%)
+        </div>
+      </div>
+
+      {/* Detail */}
+      <div style={{ padding: '12px 16px', background: actionColor + '08' }}>
+        {/* Current state */}
+        <div style={{
+          display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)',
+          gap: 10, marginBottom: 12,
+        }}>
+          <div>
+            <div style={{ fontFamily: FONT, fontSize: 8, color: COLORS.text3, letterSpacing: '0.06em' }}>CURRENT SPEED</div>
+            <div style={{ fontFamily: FONT, fontSize: 18, fontWeight: 700, color: COLORS.text }}>{Math.round(currentRate)}</div>
+            <div style={{ fontFamily: FONT, fontSize: 9, color: COLORS.text3 }}>lbs/hr</div>
+          </div>
+          <div>
+            <div style={{ fontFamily: FONT, fontSize: 8, color: COLORS.text3, letterSpacing: '0.06em' }}>DEFECTS</div>
+            <div style={{ fontFamily: FONT, fontSize: 18, fontWeight: 700, color: currentDefect > dcCeiling ? COLORS.red : COLORS.text }}>{currentDefect}%</div>
+            <div style={{ fontFamily: FONT, fontSize: 9, color: COLORS.text3 }}>combined</div>
+          </div>
+          <div>
+            <div style={{ fontFamily: FONT, fontSize: 8, color: COLORS.text3, letterSpacing: '0.06em' }}>HEADROOM</div>
+            <div style={{ fontFamily: FONT, fontSize: 18, fontWeight: 700, color: headroom <= 0 ? COLORS.red : headroom <= 2 ? COLORS.amber : COLORS.green }}>{headroom}%</div>
+            <div style={{ fontFamily: FONT, fontSize: 9, color: COLORS.text3 }}>to DC ceiling</div>
+          </div>
+          <div>
+            <div style={{ fontFamily: FONT, fontSize: 8, color: COLORS.text3, letterSpacing: '0.06em' }}>TREND (3 PAL)</div>
+            <div style={{ fontFamily: FONT, fontSize: 18, fontWeight: 700, color: trendDir === 'worse' ? COLORS.red : trendDir === 'better' ? COLORS.green : COLORS.text3 }}>
+              {trendDir === 'worse' ? '+' + round1(trending) + '%' : trendDir === 'better' ? round1(trending) + '%' : 'FLAT'}
+            </div>
+            <div style={{ fontFamily: FONT, fontSize: 9, color: COLORS.text3 }}>{trendDir}</div>
+          </div>
+        </div>
+
+        {/* Recommendation text */}
+        <div style={{
+          fontFamily: FONT, fontSize: 12, color: COLORS.text2,
+          lineHeight: 1.7, padding: '8px 0',
+        }}>
+          {actionDetail}
+        </div>
+
+        {/* Speed range bar — visual of where you are vs safe zone */}
+        {maxSafeRate && (
+          <div style={{ marginTop: 8 }}>
+            <div style={{ fontFamily: FONT, fontSize: 8, color: COLORS.text3, letterSpacing: '0.06em', marginBottom: 4 }}>
+              SPEED RANGE FOR THIS GROWER
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontFamily: FONT, fontSize: 9, color: COLORS.text3, width: 40 }}>
+                {Math.round(Math.min(...withRate.map(p => p.lineRate)))}
+              </span>
+              <div style={{
+                flex: 1, height: 8, background: COLORS.bg3, borderRadius: 4, position: 'relative', overflow: 'visible',
+              }}>
+                {/* Safe zone */}
+                {(() => {
+                  const minRate = Math.min(...withRate.map(p => p.lineRate))
+                  const maxRate = Math.max(...withRate.map(p => p.lineRate))
+                  const range = maxRate - minRate || 1
+                  const safeEnd = ((maxSafeRate - minRate) / range) * 100
+                  const dangerStart = minDangerRate ? ((minDangerRate - minRate) / range) * 100 : 100
+                  const currentPos = ((currentRate - minRate) / range) * 100
+
+                  return (
+                    <>
+                      <div style={{
+                        position: 'absolute', left: 0, top: 0, bottom: 0,
+                        width: `${Math.min(100, safeEnd)}%`,
+                        background: COLORS.green + '40', borderRadius: 4,
+                      }} />
+                      {minDangerRate && (
+                        <div style={{
+                          position: 'absolute', right: 0, top: 0, bottom: 0,
+                          width: `${100 - dangerStart}%`,
+                          background: COLORS.red + '30', borderRadius: 4,
+                        }} />
+                      )}
+                      {/* Current position marker */}
+                      <div style={{
+                        position: 'absolute', top: -3, left: `${Math.min(98, Math.max(2, currentPos))}%`,
+                        width: 4, height: 14, background: actionColor, borderRadius: 2,
+                        transform: 'translateX(-50%)',
+                      }} />
+                    </>
+                  )
+                })()}
+              </div>
+              <span style={{ fontFamily: FONT, fontSize: 9, color: COLORS.text3, width: 40, textAlign: 'right' }}>
+                {Math.round(Math.max(...withRate.map(p => p.lineRate)))}
+              </span>
+            </div>
+            <div style={{
+              display: 'flex', justifyContent: 'space-between', marginTop: 2,
+              fontFamily: FONT, fontSize: 8, color: COLORS.text3,
+            }}>
+              <span style={{ color: COLORS.green }}>safe</span>
+              <span style={{ color: COLORS.red }}>risk</span>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
 }

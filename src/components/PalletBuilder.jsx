@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { COLORS, FONT } from '../constants'
 import { loadReceipts } from '../receipts'
-import { loadPackCodes } from '../packCodes'
+import { loadPackCodes, loadFavorites, toggleFavorite, loadPackCodesGrouped } from '../packCodes'
 
 const inputStyle = {
   background: COLORS.bg3, border: `1px solid ${COLORS.border2}`,
@@ -26,10 +26,13 @@ export default function PalletBuilder({
   const [packCodeDB, setPackCodeDB] = useState([])
   const [selectedReceipt, setSelectedReceipt] = useState('')
 
+  const [favorites, setFavoritesState] = useState([])
+
   useEffect(() => {
     const refresh = () => {
       setActiveReceipts(loadReceipts().filter(r => r.status === 'active'))
       setPackCodeDB(loadPackCodes())
+      setFavoritesState(loadFavorites())
     }
     refresh()
     const id = setInterval(refresh, 5000)
@@ -87,17 +90,42 @@ export default function PalletBuilder({
         </div>
 
         {/* Pack code */}
-        <div style={{ minWidth: 160 }}>
+        <div style={{ minWidth: 160, position: 'relative' }}>
           <label style={labelStyle}>Pack Code</label>
           <select style={inputStyle} value={packCode}
             onChange={e => setPackCode(e.target.value)}>
             <option value="">Select...</option>
-            {packCodeDB.map(c => (
-              <option key={c.code} value={c.code}>
-                {c.code} — {c.desc}
-              </option>
-            ))}
+            {favorites.length > 0 && (
+              <optgroup label="Favorites">
+                {packCodeDB.filter(c => favorites.includes(c.code)).map(c => (
+                  <option key={c.code} value={c.code}>
+                    {c.code} — {c.desc}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            <optgroup label={favorites.length > 0 ? 'All Codes' : 'Pack Codes'}>
+              {packCodeDB.filter(c => !favorites.includes(c.code)).map(c => (
+                <option key={c.code} value={c.code}>
+                  {c.code} — {c.desc}
+                </option>
+              ))}
+            </optgroup>
           </select>
+          {/* Star toggle for current code */}
+          {packCode && (
+            <button onClick={() => {
+              toggleFavorite(packCode)
+              setFavoritesState(loadFavorites())
+            }} title={favorites.includes(packCode) ? 'Remove from favorites' : 'Add to favorites'} style={{
+              position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)',
+              background: 'none', border: 'none', cursor: 'pointer',
+              fontSize: 14, color: favorites.includes(packCode) ? COLORS.amber : COLORS.text3,
+              padding: '0 4px',
+            }}>
+              {favorites.includes(packCode) ? '\u2605' : '\u2606'}
+            </button>
+          )}
         </div>
 
         {/* Divider */}

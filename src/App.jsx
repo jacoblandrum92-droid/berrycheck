@@ -1,5 +1,6 @@
-import React, { useState, useCallback } from 'react'
+import React, { useState, useCallback, useEffect } from 'react'
 import { COLORS, FONT, gradeSample, PACK_CRITERIA, GRADE_RANK } from './constants'
+import { loadFeatures, saveFeatures } from './featureFlags'
 import { loadReceipts } from './receipts'
 import { useRelay } from './useRelay'
 import { countBerriesInZones } from './imageProcessor'
@@ -37,6 +38,8 @@ import GrowerFilter from './components/GrowerFilter'
 import PackPlan from './components/PackPlan'
 import PackoutReport from './components/PackoutReport'
 import DCReconcile from './components/DCReconcile'
+import FeaturePanel from './components/FeaturePanel'
+import PrePackNotes, { PrePackBanner } from './components/PrePackNotes'
 
 export default function App() {
   const mode = new URLSearchParams(window.location.search).get('mode')
@@ -49,6 +52,11 @@ export default function App() {
 
 function Dashboard() {
   const [view, setView] = useState('qc')
+  const [features, setFeatures] = useState(loadFeatures)
+  const [showFeatures, setShowFeatures] = useState(false)
+
+  // Persist features on change
+  useEffect(() => { saveFeatures(features) }, [features])
 
   // Daily pallet number — auto-generated from pack log
   const [dailyPalletNum, setDailyPalletNum] = useState(() => {
@@ -91,6 +99,7 @@ function Dashboard() {
   const [showPalletCloseOut, setShowPalletCloseOut] = useState(false)
   const [showPackout, setShowPackout] = useState(false)
   const [showDCReconcile, setShowDCReconcile] = useState(false)
+  const [showPrePack, setShowPrePack] = useState(false)
   const [showReceiptChange, setShowReceiptChange] = useState(false)
   const [palletReceipts, setPalletReceipts] = useState([]) // tracks receipt segments on current pallet
   const [packCode, setPackCode] = useState('')
@@ -496,6 +505,9 @@ function Dashboard() {
         onShowBackupForm={() => setShowBackupForm(true)}
         onShowPackout={() => setShowPackout(true)}
         onShowDCReconcile={() => setShowDCReconcile(true)}
+        onShowPrePack={() => setShowPrePack(true)}
+        onShowFeatures={() => setShowFeatures(true)}
+        features={features}
         trainingMode={trainingMode}
         onToggleTraining={toggleTraining}
         relayConnected={connected}
@@ -553,11 +565,13 @@ function Dashboard() {
           />
 
           {/* Pack plan — daily targets from the office */}
-          <div style={{ padding: '6px 32px' }}>
-            <PackPlan packLog={(() => {
-              try { return JSON.parse(localStorage.getItem('bc_packlog') || '[]') } catch { return [] }
-            })()} />
-          </div>
+          {features.packPlan !== false && (
+            <div style={{ padding: '6px 32px' }}>
+              <PackPlan packLog={(() => {
+                try { return JSON.parse(localStorage.getItem('bc_packlog') || '[]') } catch { return [] }
+              })()} />
+            </div>
+          )}
 
           {/* Pack criteria + layer indicator strip */}
           <div style={{
@@ -623,6 +637,13 @@ function Dashboard() {
               )
             })()}
           </div>
+
+          {/* Pre-pack notes banner for active receipt */}
+          {receiptNum && (
+            <div style={{ padding: '0 32px' }}>
+              <PrePackBanner receiptNum={receiptNum} />
+            </div>
+          )}
 
           {/* Main QC area — sample input + grade */}
           <div style={{
@@ -885,20 +906,24 @@ function Dashboard() {
           padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 20,
           minHeight: 'calc(100vh - 90px)', overflowY: 'auto',
         }}>
-          <LineMonitor />
-          <GrowerFilter history={history}>
-            {(selectedGrower) => (
-              <>
-                <SpeedQuality history={history} growerFilter={selectedGrower} />
-                <GrowerTrends history={history} growerFilter={selectedGrower} />
-              </>
-            )}
-          </GrowerFilter>
-          <OpsPanel
-            berryScore={(() => { const r = gradeSample(counts); return r.score })()}
-            history={history}
-            lotId={lotId}
-          />
+          {features.lineMonitor !== false && <LineMonitor />}
+          {(features.speedQuality !== false || features.growerTrends !== false) && (
+            <GrowerFilter history={history}>
+              {(selectedGrower) => (
+                <>
+                  {features.speedQuality !== false && <SpeedQuality history={history} growerFilter={selectedGrower} />}
+                  {features.growerTrends !== false && <GrowerTrends history={history} growerFilter={selectedGrower} />}
+                </>
+              )}
+            </GrowerFilter>
+          )}
+          {features.opsPanel !== false && (
+            <OpsPanel
+              berryScore={(() => { const r = gradeSample(counts); return r.score })()}
+              history={history}
+              lotId={lotId}
+            />
+          )}
           <LotSummary lotId={lotId} history={history} />
           <SampleHistory history={history} onClear={clearHistory} />
         </div>
@@ -996,6 +1021,16 @@ function Dashboard() {
       {/* DC Reconciliation overlay */}
       {showDCReconcile && (
         <DCReconcile onClose={() => setShowDCReconcile(false)} />
+      )}
+
+      {/* Pre-pack notes */}
+      {showPrePack && (
+        <PrePackNotes onClose={() => setShowPrePack(false)} />
+      )}
+
+      {/* Feature toggle panel */}
+      {showFeatures && (
+        <FeaturePanel features={features} setFeatures={setFeatures} onClose={() => setShowFeatures(false)} />
       )}
 
       {/* Grading guide overlay */}

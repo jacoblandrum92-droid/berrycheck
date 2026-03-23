@@ -14,12 +14,35 @@ export async function seed() {
   localStorage.removeItem('bc_history')
   localStorage.removeItem('bc_packlog')
   localStorage.removeItem('bc_receipts')
+  localStorage.removeItem('bc_packplan')
+  localStorage.removeItem('bc_packcodes_favorites')
+
+  // Seed favorite pack codes — the ~8 this shed actually uses
+  localStorage.setItem('bc_packcodes_favorites', JSON.stringify([
+    'NF1293', // 12-6oz
+    'NF740',  // 12-1pt
+    'NF1295', // 8-18oz
+    'NF4193', // 12-18oz (CHEP)
+    'NF8889', // 12-9.8oz Mighty Blue
+    'NF7291', // 12-24oz (CHEP)
+    'NF767',  // 12-2lb
+    'NF5292', // RTE Lugs
+  ]))
 
   const today = new Date().toLocaleDateString()
   const history = []
   const packLog = []
   const receipts = []
   let palletNum = 1
+
+  // Pack plan for the day — follows what the office sent
+  // Standard 18oz for most orders, Mighty Blue 9.8oz at end
+  const packPlan = [
+    { packCode: 'NF1295', label: 'GA 8-18 OZ BLUES', boxes: 1440, pallets: 10, perPallet: 144, palletType: 'brown', notes: '', balance: false },
+    { packCode: 'NF8889', label: 'GA 12-9.8 OZ, MTY BL', boxes: 432, pallets: 3, perPallet: 144, palletType: 'brown', notes: 'After sized fruit run', balance: false },
+    { packCode: 'NF740', label: 'GA 12-1 PT BLUES', boxes: 0, pallets: 0, perPallet: 144, palletType: 'brown', notes: '', balance: true },
+  ]
+  localStorage.setItem('bc_packplan', JSON.stringify(packPlan))
   let baseTime = 7 * 60 // 7:00 AM in minutes
 
   // Receipts ordered best fruit first (how a real shed prioritizes)
@@ -102,7 +125,7 @@ export async function seed() {
       packLog.push({
         id: Date.now() + palletNum * 100 + 90,
         time: minsToTime(baseTime), date: today,
-        packCode: '6-12OZ',
+        packCode: 'NF1295',
         receiptNum: rd.receiptNum, grower: rd.grower, variety: rd.variety,
         palletNum: lotId, dailyPallet: palletNum,
         boxes: randInt(90, 108),
@@ -208,7 +231,7 @@ export async function seed() {
       packLog.push({
         id: Date.now() + palletNum * 100 + 90,
         time: minsToTime(baseTime), date: today,
-        packCode: '6-12OZ-MB',
+        packCode: 'NF8889',
         receiptNum: rd.receiptNum, grower: rd.grower, variety: rd.variety,
         palletNum: lotId, dailyPallet: palletNum,
         boxes: randInt(84, 100), // sometimes short — sized fruit doesn't always fill
