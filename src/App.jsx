@@ -565,6 +565,35 @@ function Dashboard() {
             currentReceiptNum={receiptNum}
           />
 
+          {/* QC toolbar — contextual shortcuts */}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            padding: '6px 32px',
+            borderBottom: `1px solid ${COLORS.border}`,
+            background: COLORS.bg,
+          }}>
+            {features.receipts !== false && (
+              <button onClick={() => setShowReceipts(true)} style={{
+                fontFamily: FONT, fontSize: 9, color: COLORS.amber,
+                background: 'transparent', border: `1px solid ${COLORS.amberDim}`,
+                padding: '3px 10px', borderRadius: 3, cursor: 'pointer',
+                letterSpacing: '0.06em',
+              }}>RECEIPTS</button>
+            )}
+            <button onClick={() => setShowPackCodes(true)} style={{
+              fontFamily: FONT, fontSize: 9, color: COLORS.text3,
+              background: 'transparent', border: `1px solid ${COLORS.border}`,
+              padding: '3px 10px', borderRadius: 3, cursor: 'pointer',
+              letterSpacing: '0.06em',
+            }}>PACK CODES</button>
+            <button onClick={() => setShowPrePack(true)} style={{
+              fontFamily: FONT, fontSize: 9, color: COLORS.green,
+              background: 'transparent', border: `1px solid ${COLORS.greenDim}`,
+              padding: '3px 10px', borderRadius: 3, cursor: 'pointer',
+              letterSpacing: '0.06em',
+            }}>PRE-PACK</button>
+          </div>
+
           {/* Pack plan — daily targets from the office */}
           {features.packPlan !== false && (
             <div style={{ padding: '6px 32px' }}>
@@ -655,7 +684,7 @@ function Dashboard() {
             {/* LEFT — Sample input */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {/* Incoming image from phone */}
-              {incomingImage && (
+              {incomingImage ? (
                 <div style={{
                   background: COLORS.bg2, border: `1px solid ${COLORS.border}`,
                   borderRadius: 4, padding: 10,
@@ -670,13 +699,23 @@ function Dashboard() {
                     }}>
                       Capture <span style={{ color: COLORS.green, fontWeight: 400 }}>{incomingImage.timestamp}</span>
                     </div>
-                    <button onClick={() => setShowZoneEditor(true)} style={{
-                      fontFamily: FONT, fontSize: 9, color: COLORS.amber,
-                      background: 'transparent', border: `1px solid ${COLORS.amberDim}`,
-                      padding: '2px 8px', borderRadius: 2, cursor: 'pointer',
-                    }}>
-                      {getSavedZones().length > 0 ? 'EDIT ZONES' : 'DRAW ZONES'}
-                    </button>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button onClick={() => {
+                        localStorage.removeItem('bc_zones')
+                        alert('Zones cleared. Draw new zones on the next captured image.')
+                      }} style={{
+                        fontFamily: FONT, fontSize: 9, color: COLORS.amber,
+                        background: 'transparent', border: `1px solid ${COLORS.amberDim}`,
+                        padding: '2px 8px', borderRadius: 2, cursor: 'pointer',
+                      }}>RESET ZONES</button>
+                      <button onClick={() => setShowZoneEditor(true)} style={{
+                        fontFamily: FONT, fontSize: 9, color: COLORS.amber,
+                        background: 'transparent', border: `1px solid ${COLORS.amberDim}`,
+                        padding: '2px 8px', borderRadius: 2, cursor: 'pointer',
+                      }}>
+                        {getSavedZones().length > 0 ? 'EDIT ZONES' : 'DRAW ZONES'}
+                      </button>
+                    </div>
                   </div>
                   <img
                     src={incomingImage.data}
@@ -695,6 +734,15 @@ function Dashboard() {
                     }}>COUNTING...</div>
                   )}
                 </div>
+              ) : (
+                <button onClick={() => setView('camera')} style={{
+                  fontFamily: FONT, fontSize: 10, color: COLORS.text3,
+                  background: COLORS.bg2, border: `1px solid ${COLORS.border}`,
+                  padding: '12px', borderRadius: 4, cursor: 'pointer',
+                  letterSpacing: '0.06em', textAlign: 'center',
+                }}>
+                  LOCAL CAMERA — No phone image yet
+                </button>
               )}
 
               <CountEntry
@@ -906,9 +954,66 @@ function Dashboard() {
       ) : (
         /* ========== OPS MODE ========== */
         <div style={{
-          padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 20,
+          display: 'flex', flexDirection: 'column',
           minHeight: 'calc(100vh - 90px)', overflowY: 'auto',
         }}>
+          {/* Ops toolbar */}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            padding: '8px 24px',
+            borderBottom: `1px solid ${COLORS.border}`,
+            background: COLORS.bg,
+            flexWrap: 'wrap',
+          }}>
+            {features.receipts !== false && (
+              <button onClick={() => setShowReceipts(true)} style={{
+                fontFamily: FONT, fontSize: 9, color: COLORS.amber,
+                background: 'transparent', border: `1px solid ${COLORS.amberDim}`,
+                padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
+                letterSpacing: '0.06em',
+              }}>RECEIPTS</button>
+            )}
+            {features.packLog !== false && (
+              <button onClick={() => setShowPackLog(true)} style={{
+                fontFamily: FONT, fontSize: 9, color: COLORS.text3,
+                background: 'transparent', border: `1px solid ${COLORS.border}`,
+                padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
+                letterSpacing: '0.06em',
+              }}>PACK LOG</button>
+            )}
+            {features.packout !== false && (
+              <button onClick={() => setShowPackout(true)} style={{
+                fontFamily: FONT, fontSize: 9, color: COLORS.green,
+                background: 'transparent', border: `1px solid ${COLORS.greenDim}`,
+                padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
+                letterSpacing: '0.06em',
+              }}>PACKOUT</button>
+            )}
+            {features.dcReconcile !== false && (
+              <button onClick={() => setShowDCReconcile(true)} style={{
+                fontFamily: FONT, fontSize: 9, color: COLORS.amber,
+                background: 'transparent', border: `1px solid ${COLORS.amberDim}`,
+                padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
+                letterSpacing: '0.06em',
+              }}>DC RECON</button>
+            )}
+            {features.logManager !== false && (
+              <button onClick={() => setShowLogManager(true)} style={{
+                fontFamily: FONT, fontSize: 9, color: COLORS.text3,
+                background: 'transparent', border: `1px solid ${COLORS.border}`,
+                padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
+                letterSpacing: '0.06em',
+              }}>LOGS</button>
+            )}
+            <button onClick={() => setShowAccuracy(true)} style={{
+              fontFamily: FONT, fontSize: 9, color: COLORS.text3,
+              background: 'transparent', border: `1px solid ${COLORS.border}`,
+              padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
+              letterSpacing: '0.06em',
+            }}>ACCURACY</button>
+          </div>
+
+          <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 20 }}>
           {features.lineMonitor !== false && <LineMonitor />}
           {(features.speedQuality !== false || features.growerTrends !== false) && (
             <GrowerFilter history={history}>
@@ -929,6 +1034,7 @@ function Dashboard() {
           )}
           <LotSummary lotId={lotId} history={history} />
           <SampleHistory history={history} onClear={clearHistory} />
+          </div>
         </div>
       )}
 
