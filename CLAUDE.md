@@ -32,6 +32,8 @@ The app has grown fast over 2 days. The next session should focus on cleanup bef
 
 6. **The relay server stores daily summaries in-memory** (`const dailySummaries = new Map()`). If the server restarts, phone daily view loses all data. Needs file-based persistence or SQLite.
 
+7. **Phone daily view (`?mode=daily`) is broken** — as of end of session 2026-03-23, the daily report on the phone isn't loading data even after re-seeding and restarting the relay server. The `pushDailySummary` in App.jsx POSTs to `/api/daily` and the seed data also pushes, but something in the chain isn't working. Debug this first — check: is the POST actually reaching the server? Is the date format matching between the POST and the GET? Is the phone hitting the right IP/port? The DailyView fetches from `/api/daily/${date}` using `new Date().toLocaleDateString()` as the date key — locale-dependent date formatting could be the issue if the POST and GET use different formats.
+
 ## Recent Features (Session 2026-03-23)
 
 ### Bug Fixes
