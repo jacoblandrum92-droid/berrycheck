@@ -96,6 +96,7 @@ function Dashboard() {
   const [showPackLog, setShowPackLog] = useState(false)
   const [showPackCodes, setShowPackCodes] = useState(false)
   const [detailedCounts, setDetailedCounts] = useState(false)
+  const [sampleMethod, setSampleMethod] = useState('600g') // '600g' or 'clamshell'
   const [showPalletCloseOut, setShowPalletCloseOut] = useState(false)
   const [showPackout, setShowPackout] = useState(false)
   const [showDCReconcile, setShowDCReconcile] = useState(false)
@@ -700,6 +701,8 @@ function Dashboard() {
                 counts={counts} setCounts={setCounts}
                 detailed={detailedCounts}
                 onToggleDetailed={() => setDetailedCounts(!detailedCounts)}
+                sampleMethod={sampleMethod}
+                onToggleMethod={() => setSampleMethod(prev => prev === '600g' ? 'clamshell' : '600g')}
               />
 
               {/* Action buttons */}
