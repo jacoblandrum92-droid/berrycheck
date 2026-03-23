@@ -38,7 +38,7 @@ export const FONT = "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', R
 //   Decay (Alternaria/Anthracnose), White Mold, Leaky/Splits
 //
 // White Mold: 0% for Excellent, any = auto-downgrade
-// Decay: 0% for Excellent, <1% Good, <1.78% Fair
+// Decay: 0% for Excellent, ≤1% Good, ≤1.78% Fair
 // ============================================================
 
 // MBG tolerance chart — maximum percentages per grade
@@ -129,7 +129,7 @@ export const DEFECT_DETAIL = {
     { key: 'leaky',    label: 'Leaky/Split' },
   ],
   decay: [
-    { key: 'decay',     label: 'Decay (Alt/Anth)' },
+    { key: 'decayRot',  label: 'Decay (Alt/Anth)' },
     { key: 'whiteMold', label: 'White Mold' },
   ],
 }
@@ -216,14 +216,14 @@ export function gradeSample(counts) {
     if (!hasDetailed) return true // quick mode — skip sub-checks
     const p = tol.permanent
     const c = tol.condition
-    if (subPcts.stems >= (p.stems[level] || 999)) return false
-    if (subPcts.greenRed >= (p.greenRed[level] || 999)) return false
-    if (subPcts.scars >= (p.scars[level] || 999)) return false
-    if (subPcts.shrivel >= (c.shrivel[level] || 999)) return false
-    if (subPcts.bruise >= (c.bruise[level] || 999)) return false
-    if (subPcts.soft >= (c.soft[level] || 999)) return false
-    if (subPcts.crushed >= (c.crushed[level] || 999)) return false
-    if (subPcts.leaky >= (c.leaky[level] || 999)) return false
+    if (subPcts.stems > (p.stems[level] || 999)) return false
+    if (subPcts.greenRed > (p.greenRed[level] || 999)) return false
+    if (subPcts.scars > (p.scars[level] || 999)) return false
+    if (subPcts.shrivel > (c.shrivel[level] || 999)) return false
+    if (subPcts.bruise > (c.bruise[level] || 999)) return false
+    if (subPcts.soft > (c.soft[level] || 999)) return false
+    if (subPcts.crushed > (c.crushed[level] || 999)) return false
+    if (subPcts.leaky > (c.leaky[level] || 999)) return false
     return true
   }
 
@@ -236,17 +236,17 @@ export function gradeSample(counts) {
     // Any decay = cannot be Excellent
     if (decayTotal > 0) {
       // Check if within Good tolerance
-      if (pctDecay < tol.condition.decay.good &&
-          pctPermanent < tol.permanent.totalMax.good &&
-          pctCondition < tol.condition.totalMax.good &&
-          pctCombined < tol.combinedMax.good &&
+      if (pctDecay <= tol.condition.decay.good &&
+          pctPermanent <= tol.permanent.totalMax.good &&
+          pctCondition <= tol.condition.totalMax.good &&
+          pctCombined <= tol.combinedMax.good &&
           checkSubLimits('good')) {
         return 'good'
       }
-      if (pctDecay < tol.condition.decay.fair &&
-          pctPermanent < tol.permanent.totalMax.fair &&
-          pctCondition < tol.condition.totalMax.fair &&
-          pctCombined < tol.combinedMax.fair &&
+      if (pctDecay <= tol.condition.decay.fair &&
+          pctPermanent <= tol.permanent.totalMax.fair &&
+          pctCondition <= tol.condition.totalMax.fair &&
+          pctCombined <= tol.combinedMax.fair &&
           checkSubLimits('fair')) {
         return 'fair'
       }
@@ -254,23 +254,23 @@ export function gradeSample(counts) {
     }
 
     // No decay — check for Excellent
-    if (pctPermanent < tol.permanent.totalMax.excellent &&
-        pctCondition < tol.condition.totalMax.excellent &&
-        pctCombined < tol.combinedMax.excellent &&
+    if (pctPermanent <= tol.permanent.totalMax.excellent &&
+        pctCondition <= tol.condition.totalMax.excellent &&
+        pctCombined <= tol.combinedMax.excellent &&
         checkSubLimits('excellent')) {
       return 'excellent'
     }
 
-    if (pctPermanent < tol.permanent.totalMax.good &&
-        pctCondition < tol.condition.totalMax.good &&
-        pctCombined < tol.combinedMax.good &&
+    if (pctPermanent <= tol.permanent.totalMax.good &&
+        pctCondition <= tol.condition.totalMax.good &&
+        pctCombined <= tol.combinedMax.good &&
         checkSubLimits('good')) {
       return 'good'
     }
 
-    if (pctPermanent < tol.permanent.totalMax.fair &&
-        pctCondition < tol.condition.totalMax.fair &&
-        pctCombined < tol.combinedMax.fair &&
+    if (pctPermanent <= tol.permanent.totalMax.fair &&
+        pctCondition <= tol.condition.totalMax.fair &&
+        pctCombined <= tol.combinedMax.fair &&
         checkSubLimits('fair')) {
       return 'fair'
     }

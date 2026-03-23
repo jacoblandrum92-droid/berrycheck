@@ -208,6 +208,53 @@ export default function PalletBuilder({
           })}
         </div>
       )}
+
+      {/* Pack code special instructions + pallet type — visible to the whole floor */}
+      {selectedPack && (selectedPack.special || selectedPack.palletType) && (
+        <div style={{
+          marginTop: palletReceipts.length > 0 ? 8 : 0,
+          background: COLORS.amberDim, border: `1px solid ${COLORS.amber}`,
+          borderRadius: 4, padding: '6px 12px',
+          display: 'flex', alignItems: 'center', gap: 10,
+        }}>
+          {/* Pallet type badge */}
+          {selectedPack.palletType && (
+            <div style={{
+              fontFamily: FONT, fontSize: 10, fontWeight: 800,
+              color: selectedPack.palletType === 'chep' ? '#fff' : COLORS.text,
+              background: selectedPack.palletType === 'chep' ? '#1565C0' : '#8D6E3F',
+              padding: '3px 8px', borderRadius: 3,
+              letterSpacing: '0.06em',
+              flexShrink: 0,
+            }}>
+              {selectedPack.palletType === 'chep' ? 'CHEP' : 'BROWN'}
+            </div>
+          )}
+          {selectedPack.special && (
+            <>
+              <div style={{
+                fontFamily: FONT, fontSize: 9, fontWeight: 700,
+                color: COLORS.amber, letterSpacing: '0.08em',
+                flexShrink: 0,
+              }}>
+                SPECIAL
+              </div>
+              <div style={{
+                fontFamily: FONT, fontSize: 12, fontWeight: 600,
+                color: COLORS.amber,
+              }}>
+                {selectedPack.special}
+              </div>
+            </>
+          )}
+          <div style={{ flex: 1 }} />
+          <div style={{
+            fontFamily: FONT, fontSize: 9, color: COLORS.text3,
+          }}>
+            {selectedPack.code}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

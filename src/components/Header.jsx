@@ -3,7 +3,7 @@ import QRCode from 'qrcode'
 import { COLORS, FONT } from '../constants'
 
 export default function Header({
-  onOpenCamera, onResetZones, onShowAccuracy, onShowLogs, onShowReceipts, onShowPackLog, onShowPackCodes, onShowBackupForm,
+  onOpenCamera, onResetZones, onShowAccuracy, onShowLogs, onShowReceipts, onShowPackLog, onShowPackCodes, onShowBackupForm, onShowPackout, onShowDCReconcile,
   trainingMode, onToggleTraining,
   relayConnected, phonesOnline
 }) {
@@ -55,6 +55,22 @@ export default function Header({
           </div>
         </div>
 
+        {/* Dev seed data */}
+        <button onClick={async () => {
+          if (!confirm('Replace all QC history and pack log with demo data?')) return
+          const { seed } = await import('../seedData.js')
+          const result = seed()
+          alert(`Seeded ${result.samples} samples, ${result.pallets} pallets. Reloading...`)
+          window.location.reload()
+        }} style={{
+          fontFamily: FONT, fontSize: 9, color: COLORS.purple,
+          background: 'transparent', border: `1px dashed ${COLORS.purple}40`,
+          padding: '4px 8px', borderRadius: 3, cursor: 'pointer',
+          letterSpacing: '0.06em',
+        }}>
+          DEV: SEED DATA
+        </button>
+
         {/* Training mode toggle */}
         <button onClick={onToggleTraining} style={{
           fontFamily: FONT, fontSize: 10,
@@ -95,6 +111,26 @@ export default function Header({
           letterSpacing: '0.06em',
         }}>
           PACK LOG
+        </button>
+
+        {/* Packout Report */}
+        <button onClick={onShowPackout} style={{
+          fontFamily: FONT, fontSize: 10, color: COLORS.green,
+          background: 'transparent', border: `1px solid ${COLORS.greenDim}`,
+          padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
+          letterSpacing: '0.06em',
+        }}>
+          PACKOUT
+        </button>
+
+        {/* DC Reconciliation */}
+        <button onClick={onShowDCReconcile} style={{
+          fontFamily: FONT, fontSize: 10, color: COLORS.amber,
+          background: 'transparent', border: `1px solid ${COLORS.amberDim}`,
+          padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
+          letterSpacing: '0.06em',
+        }}>
+          DC RECON
         </button>
 
         {/* Logs */}

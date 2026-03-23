@@ -123,31 +123,31 @@ export default function GradingGuide({ onClose }) {
             <tbody>
               <tr>
                 <td style={tdLabel}>Permanent Defects</td>
-                <td style={tdVal}>&lt; 5%</td>
-                <td style={tdVal}>&lt; 7%</td>
-                <td style={tdVal}>&lt; 9%</td>
-                <td style={tdVal}>&ge; 9%</td>
+                <td style={tdVal}>&le; 5%</td>
+                <td style={tdVal}>&le; 7%</td>
+                <td style={tdVal}>&le; 9%</td>
+                <td style={tdVal}>&gt; 9%</td>
               </tr>
               <tr>
                 <td style={tdLabel}>Condition Defects</td>
-                <td style={tdVal}>&lt; 3%</td>
-                <td style={tdVal}>&lt; 4%</td>
-                <td style={tdVal}>&lt; 6%</td>
-                <td style={tdVal}>&ge; 6%</td>
+                <td style={tdVal}>&le; 3%</td>
+                <td style={tdVal}>&le; 4%</td>
+                <td style={tdVal}>&le; 6%</td>
+                <td style={tdVal}>&gt; 6%</td>
               </tr>
               <tr style={{ borderTop: `2px solid ${COLORS.border}` }}>
                 <td style={{ ...tdLabel, fontWeight: 700 }}>Total Combined</td>
-                <td style={{ ...tdVal, fontWeight: 700 }}>&lt; 7%</td>
-                <td style={{ ...tdVal, fontWeight: 700 }}>&lt; 10%</td>
-                <td style={{ ...tdVal, fontWeight: 700 }}>&lt; 14%</td>
-                <td style={{ ...tdVal, fontWeight: 700 }}>&ge; 14%</td>
+                <td style={{ ...tdVal, fontWeight: 700 }}>&le; 7%</td>
+                <td style={{ ...tdVal, fontWeight: 700 }}>&le; 10%</td>
+                <td style={{ ...tdVal, fontWeight: 700 }}>&le; 14%</td>
+                <td style={{ ...tdVal, fontWeight: 700 }}>&gt; 14%</td>
               </tr>
               <tr>
                 <td style={tdLabel}>Decay</td>
                 <td style={tdVal}>0%</td>
-                <td style={tdVal}>&lt; 1%</td>
-                <td style={tdVal}>&lt; 1.78%</td>
-                <td style={tdVal}>&ge; 1.78%</td>
+                <td style={tdVal}>&le; 1%</td>
+                <td style={tdVal}>&le; 1.78%</td>
+                <td style={tdVal}>&gt; 1.78%</td>
               </tr>
               <tr>
                 <td style={tdLabel}>White Mold</td>

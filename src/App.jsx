@@ -31,6 +31,12 @@ import PackLogViewer, { PackLogInput } from './components/PackLog'
 import PackCodeManager from './components/PackCodeManager'
 import PalletCloseOut from './components/PalletCloseOut'
 import ReceiptChange from './components/ReceiptChange'
+import SpeedQuality from './components/SpeedQuality'
+import GrowerTrends from './components/GrowerTrends'
+import GrowerFilter from './components/GrowerFilter'
+import PackPlan from './components/PackPlan'
+import PackoutReport from './components/PackoutReport'
+import DCReconcile from './components/DCReconcile'
 
 export default function App() {
   const mode = new URLSearchParams(window.location.search).get('mode')
@@ -83,6 +89,8 @@ function Dashboard() {
   const [showPackCodes, setShowPackCodes] = useState(false)
   const [detailedCounts, setDetailedCounts] = useState(false)
   const [showPalletCloseOut, setShowPalletCloseOut] = useState(false)
+  const [showPackout, setShowPackout] = useState(false)
+  const [showDCReconcile, setShowDCReconcile] = useState(false)
   const [showReceiptChange, setShowReceiptChange] = useState(false)
   const [palletReceipts, setPalletReceipts] = useState([]) // tracks receipt segments on current pallet
   const [packCode, setPackCode] = useState('')
@@ -109,7 +117,7 @@ function Dashboard() {
   const getSavedZones = () => {
     try {
       const saved = JSON.parse(localStorage.getItem('bc_zones') || '[]')
-      const validKeys = ['good', 'soft', 'major', 'reds', 'greens', 'defects', 'zero']
+      const validKeys = ['good', 'permanent', 'condition', 'decay']
       return saved.filter(z => validKeys.includes(z.key))
     } catch { return [] }
   }
@@ -296,7 +304,7 @@ function Dashboard() {
       time: new Date().toLocaleTimeString('en-US', { hour12: false }),
       date: new Date().toLocaleDateString(),
       lotId, receiptNum, grower, variety,
-      good: 0, soft: 0, major: 0, reds: 0, greens: 0, defects: 0, zero: 0,
+      good: 0, permanent: 0, condition: 0, decay: 0,
       isExtra: false,
       isSkipped: true,
       sampleNum: officialCount + 1,
@@ -437,7 +445,7 @@ function Dashboard() {
     setVariety('')
     setPalletReceipts([])
     setPackCode('')
-  }, [])
+  }, [palletLineStats])
 
   const clearHistory = useCallback(() => saveHistory([]), [saveHistory])
 
@@ -486,6 +494,8 @@ function Dashboard() {
         onShowPackLog={() => setShowPackLog(true)}
         onShowPackCodes={() => setShowPackCodes(true)}
         onShowBackupForm={() => setShowBackupForm(true)}
+        onShowPackout={() => setShowPackout(true)}
+        onShowDCReconcile={() => setShowDCReconcile(true)}
         trainingMode={trainingMode}
         onToggleTraining={toggleTraining}
         relayConnected={connected}
@@ -541,6 +551,13 @@ function Dashboard() {
             packCode={packCode} setPackCode={setPackCode}
             currentReceiptNum={receiptNum}
           />
+
+          {/* Pack plan — daily targets from the office */}
+          <div style={{ padding: '6px 32px' }}>
+            <PackPlan packLog={(() => {
+              try { return JSON.parse(localStorage.getItem('bc_packlog') || '[]') } catch { return [] }
+            })()} />
+          </div>
 
           {/* Pack criteria + layer indicator strip */}
           <div style={{
@@ -869,6 +886,14 @@ function Dashboard() {
           minHeight: 'calc(100vh - 90px)', overflowY: 'auto',
         }}>
           <LineMonitor />
+          <GrowerFilter history={history}>
+            {(selectedGrower) => (
+              <>
+                <SpeedQuality history={history} growerFilter={selectedGrower} />
+                <GrowerTrends history={history} growerFilter={selectedGrower} />
+              </>
+            )}
+          </GrowerFilter>
           <OpsPanel
             berryScore={(() => { const r = gradeSample(counts); return r.score })()}
             history={history}
@@ -947,7 +972,7 @@ function Dashboard() {
           lotId={lotId}
           receiptNum={receiptNum}
           grower={grower}
-          packCode={lastPackCode}
+          packCode={packCode}
           priorReceipts={palletReceipts}
           palletLineStats={palletLineStats}
           onClose={(data) => {
@@ -961,6 +986,16 @@ function Dashboard() {
       {/* Backup form */}
       {showBackupForm && (
         <BackupForm onClose={() => setShowBackupForm(false)} />
+      )}
+
+      {/* Packout report overlay */}
+      {showPackout && (
+        <PackoutReport onClose={() => setShowPackout(false)} />
+      )}
+
+      {/* DC Reconciliation overlay */}
+      {showDCReconcile && (
+        <DCReconcile onClose={() => setShowDCReconcile(false)} />
       )}
 
       {/* Grading guide overlay */}

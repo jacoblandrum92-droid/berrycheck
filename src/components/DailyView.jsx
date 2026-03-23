@@ -27,6 +27,7 @@ export default function DailyView() {
   const [selectedDate, setSelectedDate] = useState(null)
   const [error, setError] = useState(null)
   const [showArchive, setShowArchive] = useState(false)
+  const [growerFilter, setGrowerFilter] = useState(null)
 
   const dateParam = new URLSearchParams(window.location.search).get('date')
 
@@ -43,6 +44,7 @@ export default function DailyView() {
   const loadDate = (date) => {
     setSelectedDate(date)
     setShowArchive(false)
+    setGrowerFilter(null)
     fetch(`/api/daily/${encodeURIComponent(date)}`)
       .then(r => { if (!r.ok) throw new Error('No data'); return r.json() })
       .then(d => { setSummary(d); setError(null) })
@@ -103,23 +105,85 @@ export default function DailyView() {
         <div style={{ padding: 16 }}>
           {/* Date header */}
           <div style={{
-            fontSize: 13, fontWeight: 600, color: COLORS.text2, marginBottom: 16,
+            fontSize: 13, fontWeight: 600, color: COLORS.text2, marginBottom: 12,
             display: 'flex', justifyContent: 'space-between',
           }}>
             <span>{summary.date}</span>
             <span>{summary.pallets?.length || 0} pallets</span>
           </div>
 
-          {/* Day totals */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 20 }}>
-            <StatCard label="Pallets" value={summary.pallets?.length || 0} />
-            <StatCard label="Avg Lbs/Hr" value={summary.avgLineRate ? Math.round(summary.avgLineRate).toLocaleString() : '—'} />
-            <StatCard label="Avg Blowoff" value={summary.avgBlowoff != null ? `${summary.avgBlowoff}%` : '—'}
-              color={summary.avgBlowoff > 12 ? COLORS.red : summary.avgBlowoff > 8 ? COLORS.amber : COLORS.text} />
-          </div>
+          {/* Grower filter */}
+          {(() => {
+            const allPallets = summary.pallets || []
+            const growerMap = {}
+            allPallets.forEach(p => {
+              if (!p.grower) return
+              if (!growerMap[p.grower]) growerMap[p.grower] = 0
+              growerMap[p.grower]++
+            })
+            const growers = Object.entries(growerMap)
+              .sort((a, b) => b[1] - a[1])
+              .map(([grower, count]) => ({ grower, count }))
 
-          {/* Pallet list — scrollable */}
-          {summary.pallets && summary.pallets.map((p, i) => {
+            if (growers.length <= 1) return null
+
+            return (
+              <div style={{
+                display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap',
+              }}>
+                <button onClick={() => setGrowerFilter(null)} style={{
+                  fontFamily: FONT, fontSize: 11, fontWeight: !growerFilter ? 700 : 400,
+                  color: !growerFilter ? COLORS.green : COLORS.text3,
+                  background: !growerFilter ? COLORS.greenBg : 'transparent',
+                  border: `1px solid ${!growerFilter ? COLORS.green : COLORS.border}`,
+                  padding: '5px 10px', borderRadius: 4, cursor: 'pointer',
+                }}>
+                  All
+                </button>
+                {growers.map(g => {
+                  const active = growerFilter === g.grower
+                  return (
+                    <button key={g.grower} onClick={() => setGrowerFilter(g.grower)} style={{
+                      fontFamily: FONT, fontSize: 11, fontWeight: active ? 700 : 400,
+                      color: active ? COLORS.green : COLORS.text2,
+                      background: active ? COLORS.greenBg : 'transparent',
+                      border: `1px solid ${active ? COLORS.green : COLORS.border}`,
+                      padding: '5px 10px', borderRadius: 4, cursor: 'pointer',
+                    }}>
+                      {g.grower} <span style={{ fontSize: 9, color: active ? COLORS.green : COLORS.text3 }}>{g.count}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            )
+          })()}
+
+          {/* Day totals — filtered */}
+          {(() => {
+            const allPallets = summary.pallets || []
+            const filtered = growerFilter ? allPallets.filter(p => p.grower === growerFilter) : allPallets
+            const withRate = filtered.filter(p => p.lineRate)
+            const withBlowoff = filtered.filter(p => p.blowoff != null)
+            const avgRate = withRate.length > 0 ? Math.round(withRate.reduce((s, p) => s + p.lineRate, 0) / withRate.length) : null
+            const avgBlow = withBlowoff.length > 0
+              ? Math.round((withBlowoff.reduce((s, p) => s + p.blowoff, 0) / withBlowoff.length) * 10) / 10
+              : null
+
+            return (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 20 }}>
+                <StatCard label="Pallets" value={filtered.length} />
+                <StatCard label="Avg Lbs/Hr" value={avgRate ? avgRate.toLocaleString() : '—'} />
+                <StatCard label="Avg Blowoff" value={avgBlow != null ? `${avgBlow}%` : '—'}
+                  color={avgBlow > 12 ? COLORS.red : avgBlow > 8 ? COLORS.amber : COLORS.text} />
+              </div>
+            )
+          })()}
+
+          {/* Pallet list — filtered + scrollable */}
+          {(growerFilter
+            ? (summary.pallets || []).filter(p => p.grower === growerFilter)
+            : summary.pallets || []
+          ).map((p, i) => {
             const gs = GRADE_STYLE[p.grade] || GRADE_STYLE.GOOD
             return (
               <div key={i} style={{
