@@ -4,9 +4,10 @@ Read the memory files at `C:\Users\jacob\.claude\projects\C--Users-jacob\memory\
 
 ## Critical Rules
 - **Never block the workflow.** All fields optional, all steps skippable. The line doesn't stop for the app.
-- **Grading math must be correct.** Tolerances use `<=` (at-limit = pass) per MBG "shall not exceed" standard.
+- **Grading math must be correct.** Tolerances use `<=` (at-limit = pass) per MBG "shall not exceed" standard. `gradeSample(counts, tolerances)` accepts any tolerance table — default is MBG.
 - **Offline-first.** No internet in the shed. Everything runs on local WiFi.
-- Read `src/constants.js` for the grading engine — it's the heart of the app.
+- **MBG standard is proprietary.** Butterfly Standard exists as an independent alternative for non-MBG sheds. The Butterfly philosophy is retail-first: strict on condition defects (soft, leaky, decay — what consumers reject), lenient on cosmetic permanent defects (stems, color, scars — what consumers tolerate).
+- Read `src/constants.js` for the grading engine — it's the heart of the app. Both `MBG_TOLERANCES` and `BUTTERFLY_TOLERANCES` live there, referenced via `GRADING_STANDARDS`.
 
 ## Architecture
 - React 19 + Vite frontend, Express/WebSocket relay server (`server.js`)
@@ -24,7 +25,7 @@ The app has grown fast over 2 days. The next session should focus on cleanup bef
 
 2. **Header.jsx has too many buttons** — 12+ buttons across the top. Needs a menu/dropdown or grouping. The header is wider than most screens.
 
-3. **Feature flags are defined but not fully wired** — many features have toggle keys in `featureFlags.js` but aren't actually gated in the components. The Header gates some buttons, the Ops tab gates some views, but QC-side features like `clamshellSample`, `extraSamples`, `skipControls`, `lineStats` prompt, etc. aren't gated yet.
+3. **Feature flags are defined but not fully wired** — many features have toggle keys in `featureFlags.js` but aren't actually gated in the components. The Header gates some buttons, the Ops tab gates some views, but QC-side features like `extraSamples`, `skipControls`, `lineStats` prompt, etc. aren't gated yet. The old `clamshellSample` flag name may be stale — sampling methods are now `fullcount`/`manual`/`600g`.
 
 4. **Duplicate data patterns** — `averageCounts()` is defined in both App.jsx and LotSummary.jsx. Pack log loading happens in multiple components independently. Should centralize.
 
@@ -55,7 +56,7 @@ The app has grown fast over 2 days. The next session should focus on cleanup bef
 - **Pack code special instructions** — amber banner on QC side when code has special requirements
 - **Favorite pack codes** — star toggle, favorites grouped at top of dropdown
 - **Pallet type (CHEP/brown)** — on all pack codes with migration for existing data
-- **Clamshell sampling** — toggle to sample a cup off the line instead of 600g weigh-out
+- **Three sampling methods** — Full Count (camera counts total, QCer pulls defects only, includes pack weight for calibration), Manual Count (hand-count total, replaces old "Clamshell"), 600g Subsample (traditional MBG 30-berry weigh)
 - **Pre-Pack Notes** — quick tags + free-text about raw fruit, inline banner on QC side
 
 ### New Reports
@@ -68,6 +69,28 @@ The app has grown fast over 2 days. The next session should focus on cleanup bef
 - **Feature toggle system** — 31 features, 8 categories, 4 presets, toggle panel
 - **Dev seed data** — realistic day simulation with pack plan, receipts, favorites
 - **Daily summary push** — seed data pushes to relay server for phone daily view
+
+## Recent Features (Session 2026-03-24)
+
+### Grading Standards
+- **Butterfly Standard** — independent grading system, retail-first philosophy. Tighter on condition (soft 1/2/3%, leaky 0/1/2%, decay 0/0.5/1%), lenient on cosmetic permanent (stems 5/7/10%, scars 5/7/10%). Toggled via QC Settings panel.
+- **`gradeSample(counts, tolerances)`** — grading engine now parameterized. Any tolerance table can be passed. `GRADING_STANDARDS` maps keys to tables.
+
+### Sampling Methods
+- **Full Count** — camera counts total berries from photo, QCer only pulls and counts defects. Pack weight recorded for filler/scale calibration (metadata only, doesn't affect grading). Most accurate method.
+- **Manual Count** — replaces "Clamshell". QCer hand-counts total berries then sorts defects. Same rigor as Full Count without camera.
+- **600g Subsample** — traditional MBG method unchanged. 30-berry subsample weight estimates total.
+
+### QC Settings UI
+- **SOP-grade procedures** — each sampling method has numbered step-by-step instructions displayed on screen. Designed to pass compliance scrutiny.
+- **Info panels** — every toggle (standard, method, defect entry) has a brief description always visible + expandable [?] with verbose explanation of when/why to use that setting.
+- **Pack criteria specs** — Mighty Blue and Sweet Selections berry size requirements now shown inline at selector and in score display. `PACK_CRITERIA` includes `spec` string and `minBerryMM` field.
+
+### Key Architecture Note
+- `sampleMethod` state in App.jsx cycles: `'fullcount'` → `'600g'` → `'manual'` → `'fullcount'`
+- `gradingStandard` state: `'mbg'` or `'butterfly'`
+- CountEntry stores method metadata in counts: `_sampleMethod`, `_fullcountTotal`, `_packWeight`, `_manualTotal`, `_thirtyBerryWeight`
+- Camera integration (phone snap → WebSocket → auto-count) already exists and is separate from the sampling method. The "Full Count" method's total berry input is designed to be auto-populated by the camera system.
 
 ## Business Context
 BerryCheck is not just a QC tool. The real product is a DC tolerance model + line optimization engine. See `project_berrycheck.md` in memory for the full framing. The DC Reconciliation feature is the data input for the tolerance model — it needs real season data to validate.
