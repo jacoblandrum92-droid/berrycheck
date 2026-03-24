@@ -1,11 +1,189 @@
 import React, { useState, useEffect } from 'react'
 import { COLORS, FONT, DEFECT_DETAIL } from '../constants'
 
-export default function CountEntry({ counts, setCounts, detailed, onToggleDetailed, sampleMethod, onToggleMethod }) {
-  const [thirtyBerryWeight, setThirtyBerryWeight] = useState('')
-  const [clamTotal, setClamTotal] = useState('')
+// ============================================================
+// TOGGLE DEFINITIONS — name, brief, verbose, SOP steps
+// ============================================================
 
-  const isClam = sampleMethod === 'clamshell'
+const STANDARDS = {
+  mbg: {
+    label: 'MBG',
+    brief: 'MBG industry standard tolerances',
+    verbose: 'Michigan Blueberry Growers Association standard. Proprietary tolerance chart used across MBG member facilities. Balances permanent and condition defect tolerances equally. Use when packing under an MBG contract or when the receiving DC expects MBG-standard grading.',
+  },
+  butterfly: {
+    label: 'BUTTERFLY',
+    brief: 'Retail-first — strict on condition, lenient on cosmetic',
+    verbose: 'Butterfly proprietary grading standard. Designed around what matters at retail: condition defects (soft, leaky, decayed fruit) are held to strict tolerances because they cause consumer rejection and shelf-life failures. Cosmetic permanent defects (stems, minor color, scarring) are more lenient — consumers tolerate these. Use for non-MBG customers or when optimizing for DC pass rates on condition-sensitive accounts.',
+  },
+}
+
+const METHODS = {
+  fullcount: {
+    label: 'FULL COUNT',
+    brief: 'Camera counts total berries. QCer pulls and records all defects.',
+    verbose: 'The most accurate sampling method. Camera provides an exact total berry count from a photograph. QCer inspects every berry in the sample, removes all defects, and records counts by category. No subsampling — every berry is graded. Recommended when camera hardware is available.',
+    color: '#2563EB',
+    steps: [
+      'Select one finished pack unit from the packing line.',
+      'Weigh the pack on a calibrated scale and record weight (g). This verifies filler/scale calibration — it does not affect grading.',
+      'Dump contents onto clean, dry sampling tray.',
+      'Photograph the sample — camera counts total berries automatically.',
+      'Verify camera count matches visual estimate. Correct manually if needed.',
+      'Inspect every berry. Remove all defective berries from the sample.',
+      'Sort defects by category and record counts below.',
+    ],
+  },
+  manual: {
+    label: 'MANUAL COUNT',
+    brief: 'QCer hand-counts total berries, then pulls and records all defects.',
+    verbose: 'Same inspection rigor as Full Count but without camera assistance. QCer manually counts total berries after dumping the pack, then inspects and sorts. Use when camera is unavailable or as a cross-check against camera counts.',
+    color: COLORS.purple,
+    steps: [
+      'Select one finished pack unit from the packing line.',
+      'Dump contents onto clean, dry sampling tray.',
+      'Count every berry by hand and record the total below.',
+      'Inspect every berry. Remove all defective berries from the sample.',
+      'Sort defects by category and record counts below.',
+    ],
+  },
+  '600g': {
+    label: '600G SUBSAMPLE',
+    brief: '600g weighed sample with 30-berry subsample to estimate total count.',
+    verbose: 'Traditional MBG sampling method. A 600-gram fruit sample is collected and a 30-berry subsample is weighed to estimate total berry count via average berry weight. All berries in the 600g sample are then sorted and graded. The 30-berry weight also provides berry size classification. Note: total count is estimated, not exact.',
+    color: COLORS.text2,
+    steps: [
+      'Collect exactly 600 grams of fruit from the packing line using a calibrated scale.',
+      'Pull 30 berries at random from the 600g sample.',
+      'Weigh the 30-berry subsample on a calibrated scale. Record weight in grams below.',
+      'Return the 30 berries to the main 600g sample.',
+      'Inspect every berry in the full sample. Remove all defective berries.',
+      'Sort defects by category and record counts below.',
+      'System calculates estimated total berry count from the 30-berry subsample weight.',
+    ],
+  },
+}
+
+const DETAIL_MODES = {
+  quick: {
+    label: 'QUICK',
+    brief: '3-pile sort: permanent, condition, decay/mold.',
+    verbose: 'Defects are sorted into three broad piles: Permanent (stems, green/red, scars), Condition (shrivel, bruise, soft, crushed, leaky), and Decay/Mold. One count per pile. Faster data entry but does not check individual defect sub-limits — a single defect type could exceed its tolerance without being flagged if the category total is still within range.',
+  },
+  detailed: {
+    label: 'DETAILED',
+    brief: 'Individual counts for each defect type. Enables sub-limit checking.',
+    verbose: 'Each defect type is counted individually: stems, green/red, scars, shrivel, bruise, soft, crushed, leaky, decay (alternaria/anthracnose), and white mold. Enables sub-limit enforcement — the system checks each defect type against its own tolerance threshold in addition to category totals. Catches edge cases where one defect type is abnormally high. Required for full compliance with detailed grading standards.',
+  },
+}
+
+// ============================================================
+// INFO PANEL — expandable verbose description
+// ============================================================
+
+function InfoPanel({ config, expanded, onToggleExpand }) {
+  return (
+    <div>
+      <div style={{
+        fontFamily: FONT, fontSize: 10, color: COLORS.text2, lineHeight: 1.4,
+        display: 'flex', alignItems: 'flex-start', gap: 6,
+      }}>
+        <span style={{ flex: 1 }}>{config.brief}</span>
+        <button onClick={onToggleExpand} style={{
+          fontFamily: FONT, fontSize: 9, fontWeight: 700,
+          color: COLORS.text3, background: 'none', border: `1px solid ${COLORS.border}`,
+          borderRadius: 2, padding: '0 4px', cursor: 'pointer', lineHeight: '16px',
+          flexShrink: 0, marginTop: 1,
+        }}>
+          {expanded ? '−' : '?'}
+        </button>
+      </div>
+      {expanded && (
+        <div style={{
+          fontFamily: FONT, fontSize: 10, color: COLORS.text2,
+          lineHeight: 1.5, marginTop: 6, padding: '8px 10px',
+          background: COLORS.bg, border: `1px solid ${COLORS.border}`,
+          borderRadius: 3,
+        }}>
+          {config.verbose}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ============================================================
+// SETTING ROW — label + toggle button + info
+// ============================================================
+
+function SettingRow({ label, config, buttonLabel, buttonColor, active, onClick, expanded, onToggleExpand }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{
+          fontFamily: FONT, fontSize: 9, fontWeight: 600, color: COLORS.text3,
+          textTransform: 'uppercase', letterSpacing: '0.06em',
+        }}>
+          {label}
+        </div>
+        <button onClick={onClick} style={{
+          fontFamily: FONT, fontSize: 9, fontWeight: 600,
+          color: active ? buttonColor : COLORS.text2,
+          background: active ? (buttonColor + '15') : COLORS.bg,
+          border: `1px solid ${active ? buttonColor : COLORS.border}`,
+          padding: '3px 10px', borderRadius: 3, cursor: 'pointer',
+          letterSpacing: '0.06em',
+        }}>
+          {buttonLabel}
+        </button>
+      </div>
+      <InfoPanel config={config} expanded={expanded} onToggleExpand={onToggleExpand} />
+    </div>
+  )
+}
+
+// ============================================================
+// SOP STEPS — numbered procedure display
+// ============================================================
+
+function SOPSteps({ steps }) {
+  return (
+    <div style={{
+      fontFamily: FONT, fontSize: 10, color: COLORS.text3,
+      lineHeight: 1.6, marginBottom: 8,
+      padding: '8px 10px', background: COLORS.bg2,
+      borderRadius: 4, border: `1px solid ${COLORS.border}`,
+    }}>
+      <div style={{
+        fontFamily: FONT, fontSize: 9, fontWeight: 600, color: COLORS.text3,
+        textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6,
+      }}>Sampling Procedure</div>
+      <ol style={{ margin: 0, paddingLeft: 18 }}>
+        {steps.map((step, i) => (
+          <li key={i} style={{ marginBottom: i < steps.length - 1 ? 4 : 0 }}>
+            <span style={{ color: COLORS.text2 }}>{step}</span>
+          </li>
+        ))}
+      </ol>
+    </div>
+  )
+}
+
+// ============================================================
+// MAIN COMPONENT
+// ============================================================
+
+export default function CountEntry({ counts, setCounts, detailed, onToggleDetailed, sampleMethod, onToggleMethod, gradingStandard, onToggleStandard }) {
+  const [thirtyBerryWeight, setThirtyBerryWeight] = useState('')
+  const [manualTotal, setManualTotal] = useState('')
+  const [fullcountTotal, setFullcountTotal] = useState('')
+  const [packWeight, setPackWeight] = useState('')
+  const [expandedInfo, setExpandedInfo] = useState(null)
+
+  const isManual = sampleMethod === 'manual'
+  const isFullCount = sampleMethod === 'fullcount'
+
+  const toggleInfo = (key) => setExpandedInfo(prev => prev === key ? null : key)
 
   // === 600g mode calculations ===
   const avgBerryWeight = thirtyBerryWeight ? (parseFloat(thirtyBerryWeight) / 30) : 0
@@ -23,7 +201,8 @@ export default function CountEntry({ counts, setCounts, detailed, onToggleDetail
     : COLORS.text3
 
   // === Active total — depends on mode ===
-  const estimatedTotal = isClam ? (parseInt(clamTotal) || null) : estimatedTotal600
+  const estimatedTotal = isFullCount ? (parseInt(fullcountTotal) || null)
+    : isManual ? (parseInt(manualTotal) || null) : estimatedTotal600
 
   // Calculate total defects
   const totalDefects = detailed
@@ -41,19 +220,27 @@ export default function CountEntry({ counts, setCounts, detailed, onToggleDetail
 
   // Store metadata in counts
   useEffect(() => {
-    if (isClam) {
+    if (isFullCount) {
+      const t = parseInt(fullcountTotal) || 0
+      const w = parseFloat(packWeight) || 0
       setCounts(prev => {
-        if (prev._sampleMethod === 'clamshell' && prev._clamTotal === (parseInt(clamTotal) || 0)) return prev
-        return { ...prev, _sampleMethod: 'clamshell', _clamTotal: parseInt(clamTotal) || 0, _thirtyBerryWeight: 0 }
+        if (prev._sampleMethod === 'fullcount' && prev._fullcountTotal === t && prev._packWeight === w) return prev
+        return { ...prev, _sampleMethod: 'fullcount', _fullcountTotal: t, _packWeight: w, _manualTotal: 0, _thirtyBerryWeight: 0 }
+      })
+    } else if (isManual) {
+      const t = parseInt(manualTotal) || 0
+      setCounts(prev => {
+        if (prev._sampleMethod === 'manual' && prev._manualTotal === t) return prev
+        return { ...prev, _sampleMethod: 'manual', _manualTotal: t, _thirtyBerryWeight: 0, _fullcountTotal: 0, _packWeight: 0 }
       })
     } else {
       const w = parseFloat(thirtyBerryWeight) || 0
       setCounts(prev => {
         if (prev._sampleMethod === '600g' && prev._thirtyBerryWeight === w) return prev
-        return { ...prev, _sampleMethod: '600g', _thirtyBerryWeight: w, _clamTotal: 0 }
+        return { ...prev, _sampleMethod: '600g', _thirtyBerryWeight: w, _manualTotal: 0, _fullcountTotal: 0, _packWeight: 0 }
       })
     }
-  }, [thirtyBerryWeight, clamTotal, isClam])
+  }, [thirtyBerryWeight, manualTotal, fullcountTotal, packWeight, isManual, isFullCount])
 
   // Auto-calculate good when total or defects change
   useEffect(() => {
@@ -70,7 +257,7 @@ export default function CountEntry({ counts, setCounts, detailed, onToggleDetail
         return { ...prev, good: newGood }
       })
     }
-  }, [isClam ? clamTotal : thirtyBerryWeight, estimatedTotal])
+  }, [isFullCount ? fullcountTotal : isManual ? manualTotal : thirtyBerryWeight, estimatedTotal])
 
   const update = (key, val) => {
     const newVal = Math.max(0, parseInt(val) || 0)
@@ -113,106 +300,73 @@ export default function CountEntry({ counts, setCounts, detailed, onToggleDetail
     </div>
   )
 
+  const methodConfig = METHODS[sampleMethod]
+  const standardConfig = STANDARDS[gradingStandard]
+  const detailConfig = detailed ? DETAIL_MODES.detailed : DETAIL_MODES.quick
+
   return (
     <div>
-      {/* Header with toggles */}
+      {/* === QC SETTINGS === */}
       <div style={{
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        marginBottom: 8,
+        background: COLORS.bg2, border: `1px solid ${COLORS.border}`,
+        borderRadius: 4, padding: '10px 12px', marginBottom: 8,
       }}>
         <div style={{
-          fontFamily: FONT, fontSize: 10, fontWeight: 600,
-          letterSpacing: '0.12em', textTransform: 'uppercase',
-          color: COLORS.text3,
-        }}>
-          Sample Input
-        </div>
-        <div style={{ display: 'flex', gap: 4 }}>
-          {/* Sample method toggle */}
-          <button onClick={onToggleMethod} style={{
-            fontFamily: FONT, fontSize: 9, fontWeight: 600,
-            color: isClam ? COLORS.purple : COLORS.text3,
-            background: isClam ? COLORS.purple + '15' : 'transparent',
-            border: `1px solid ${isClam ? COLORS.purple : COLORS.border}`,
-            padding: '3px 10px', borderRadius: 3, cursor: 'pointer',
-            letterSpacing: '0.06em',
-          }}>
-            {isClam ? 'CLAMSHELL' : '600G'}
-          </button>
-          {/* Detail toggle */}
-          <button onClick={onToggleDetailed} style={{
-            fontFamily: FONT, fontSize: 9, fontWeight: 600,
-            color: detailed ? COLORS.amber : COLORS.text3,
-            background: detailed ? COLORS.amberDim : 'transparent',
-            border: `1px solid ${detailed ? COLORS.amber : COLORS.border}`,
-            padding: '3px 10px', borderRadius: 3, cursor: 'pointer',
-            letterSpacing: '0.06em',
-          }}>
-            {detailed ? 'DETAILED' : 'QUICK'}
-          </button>
-        </div>
-      </div>
+          fontFamily: FONT, fontSize: 9, fontWeight: 600, color: COLORS.text3,
+          textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8,
+        }}>QC Settings</div>
 
-      {/* Instructions */}
-      <div style={{
-        fontFamily: FONT, fontSize: 10, color: COLORS.text3,
-        lineHeight: 1.6, marginBottom: 8,
-        padding: '8px 10px', background: COLORS.bg2,
-        borderRadius: 4, border: `1px solid ${COLORS.border}`,
-      }}>
-        {isClam ? (
-          <>
-            <b style={{ color: COLORS.text2 }}>1.</b> Grab a clamshell off the line.{' '}
-            <b style={{ color: COLORS.text2 }}>2.</b> Dump and count total berries.{' '}
-            <b style={{ color: COLORS.text2 }}>3.</b> Sort and count defect piles.
-          </>
-        ) : (
-          <>
-            <b style={{ color: COLORS.text2 }}>1.</b> Weigh out 600g of fruit.{' '}
-            <b style={{ color: COLORS.text2 }}>2.</b> Pull 30 berries, weigh them, record below.{' '}
-            <b style={{ color: COLORS.text2 }}>3.</b> Sort sample and count defect piles.
-          </>
-        )}
-      </div>
-
-      {/* === SAMPLE TOTAL INPUT — mode-dependent === */}
-      {isClam ? (
-        /* Clamshell mode — count total berries in cup */
-        <div style={{
-          background: COLORS.bg2, border: `1px solid ${COLORS.purple}40`,
-          borderRadius: 4, padding: '10px 12px', marginBottom: 8,
-        }}>
-          <div style={{
-            fontFamily: FONT, fontSize: 9, color: COLORS.purple,
-            textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6,
-          }}>Total Berries in Cup</div>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
-            <input type="number" min="0"
-              value={clamTotal}
-              onChange={e => setClamTotal(e.target.value)}
-              placeholder="0"
-              style={{
-                background: 'transparent', border: 'none', padding: 0,
-                fontFamily: FONT, fontSize: 22, fontWeight: 700,
-                color: clamTotal ? COLORS.text : COLORS.text3,
-                width: '80px', outline: 'none',
-              }}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {/* Grading Standard */}
+          {onToggleStandard && (
+            <SettingRow
+              label="Grading Standard"
+              config={standardConfig}
+              buttonLabel={standardConfig.label}
+              buttonColor={gradingStandard === 'butterfly' ? COLORS.green : COLORS.text2}
+              active={gradingStandard === 'butterfly'}
+              onClick={onToggleStandard}
+              expanded={expandedInfo === 'standard'}
+              onToggleExpand={() => toggleInfo('standard')}
             />
-            {estimatedTotal && (
-              <div style={{
-                fontFamily: FONT, fontSize: 11, color: COLORS.purple, fontWeight: 600,
-              }}>
-                clamshell sample
-              </div>
-            )}
-          </div>
+          )}
+
+          {/* Sampling Method */}
+          <SettingRow
+            label="Sampling Method"
+            config={methodConfig}
+            buttonLabel={methodConfig.label}
+            buttonColor={methodConfig.color}
+            active={isFullCount || isManual}
+            onClick={onToggleMethod}
+            expanded={expandedInfo === 'method'}
+            onToggleExpand={() => toggleInfo('method')}
+          />
+
+          {/* Defect Entry Mode */}
+          <SettingRow
+            label="Defect Entry"
+            config={detailConfig}
+            buttonLabel={detailConfig.label}
+            buttonColor={detailed ? COLORS.amber : COLORS.text2}
+            active={detailed}
+            onClick={onToggleDetailed}
+            expanded={expandedInfo === 'detail'}
+            onToggleExpand={() => toggleInfo('detail')}
+          />
         </div>
-      ) : (
-        /* 600g mode — 30-berry subsample weight */
-        <>
+      </div>
+
+      {/* === SOP PROCEDURE STEPS === */}
+      <SOPSteps steps={methodConfig.steps} />
+
+      {/* === SAMPLE SIZE INPUT — mode-dependent === */}
+      {isFullCount ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
+          {/* Pack weight — calibration check, not used for grading */}
           <div style={{
             background: COLORS.bg2, border: `1px solid ${COLORS.border}`,
-            borderRadius: 4, padding: '10px 12px', marginBottom: 8,
+            borderRadius: 4, padding: '10px 12px',
           }}>
             <div style={{
               display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -221,45 +375,139 @@ export default function CountEntry({ counts, setCounts, detailed, onToggleDetail
               <div style={{
                 fontFamily: FONT, fontSize: 9, color: COLORS.text3,
                 textTransform: 'uppercase', letterSpacing: '0.06em',
-              }}>30-Berry Weight (g)</div>
-              {berrySize && (
+              }}>Pack Weight (g) — calibration check</div>
+              {packWeight && (
                 <div style={{
-                  fontFamily: FONT, fontSize: 9, fontWeight: 600,
-                  color: berrySizeColor, letterSpacing: '0.04em',
-                  display: 'flex', gap: 8, alignItems: 'center',
+                  fontFamily: FONT, fontSize: 9, color: COLORS.text3,
+                  letterSpacing: '0.04em',
                 }}>
-                  <span style={{ color: COLORS.text3, fontWeight: 400 }}>
-                    {avgBerryWeight > 0 ? `${Math.round(avgBerryWeight * 100) / 100}g · ~${Math.round(13 + (avgBerryWeight - 1.1) * 4.55)}mm` : ''}
-                  </span>
-                  {berrySize.toUpperCase()}
+                  {(parseFloat(packWeight) / 28.35).toFixed(1)} oz
                 </div>
               )}
             </div>
+            <input type="number" min="0" step="0.1"
+              value={packWeight}
+              onChange={e => setPackWeight(e.target.value)}
+              placeholder="0"
+              style={{
+                background: 'transparent', border: 'none', padding: 0,
+                fontFamily: FONT, fontSize: 18, fontWeight: 600,
+                color: packWeight ? COLORS.text : COLORS.text3,
+                width: '100%', outline: 'none',
+              }}
+            />
+          </div>
+          {/* Total berries — from camera */}
+          <div style={{
+            background: COLORS.bg2, border: `1px solid #2563EB40`,
+            borderRadius: 4, padding: '10px 12px',
+          }}>
+            <div style={{
+              fontFamily: FONT, fontSize: 9, color: '#2563EB',
+              textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6,
+            }}>Total Berries — camera count</div>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
-              <input type="number" min="0" step="0.1"
-                value={thirtyBerryWeight}
-                onChange={e => setThirtyBerryWeight(e.target.value)}
+              <input type="number" min="0"
+                value={fullcountTotal}
+                onChange={e => setFullcountTotal(e.target.value)}
                 placeholder="0"
                 style={{
                   background: 'transparent', border: 'none', padding: 0,
                   fontFamily: FONT, fontSize: 22, fontWeight: 700,
-                  color: thirtyBerryWeight ? COLORS.text : COLORS.text3,
+                  color: fullcountTotal ? COLORS.text : COLORS.text3,
                   width: '80px', outline: 'none',
                 }}
               />
               {estimatedTotal && (
                 <div style={{
-                  fontFamily: FONT, fontSize: 12, color: COLORS.green, fontWeight: 600,
+                  fontFamily: FONT, fontSize: 11, color: '#2563EB', fontWeight: 600,
                 }}>
-                  ≈ {estimatedTotal} berries in sample
+                  every berry inspected
                 </div>
               )}
             </div>
           </div>
-        </>
+        </div>
+      ) : isManual ? (
+        <div style={{
+          background: COLORS.bg2, border: `1px solid ${COLORS.purple}40`,
+          borderRadius: 4, padding: '10px 12px', marginBottom: 8,
+        }}>
+          <div style={{
+            fontFamily: FONT, fontSize: 9, color: COLORS.purple,
+            textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6,
+          }}>Total Berries — hand count</div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
+            <input type="number" min="0"
+              value={manualTotal}
+              onChange={e => setManualTotal(e.target.value)}
+              placeholder="0"
+              style={{
+                background: 'transparent', border: 'none', padding: 0,
+                fontFamily: FONT, fontSize: 22, fontWeight: 700,
+                color: manualTotal ? COLORS.text : COLORS.text3,
+                width: '80px', outline: 'none',
+              }}
+            />
+            {estimatedTotal && (
+              <div style={{
+                fontFamily: FONT, fontSize: 11, color: COLORS.purple, fontWeight: 600,
+              }}>
+                every berry inspected
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div style={{
+          background: COLORS.bg2, border: `1px solid ${COLORS.border}`,
+          borderRadius: 4, padding: '10px 12px', marginBottom: 8,
+        }}>
+          <div style={{
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            marginBottom: 6,
+          }}>
+            <div style={{
+              fontFamily: FONT, fontSize: 9, color: COLORS.text3,
+              textTransform: 'uppercase', letterSpacing: '0.06em',
+            }}>30-Berry Subsample Weight (g)</div>
+            {berrySize && (
+              <div style={{
+                fontFamily: FONT, fontSize: 9, fontWeight: 600,
+                color: berrySizeColor, letterSpacing: '0.04em',
+                display: 'flex', gap: 8, alignItems: 'center',
+              }}>
+                <span style={{ color: COLORS.text3, fontWeight: 400 }}>
+                  {avgBerryWeight > 0 ? `${Math.round(avgBerryWeight * 100) / 100}g · ~${Math.round(13 + (avgBerryWeight - 1.1) * 4.55)}mm` : ''}
+                </span>
+                {berrySize.toUpperCase()}
+              </div>
+            )}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
+            <input type="number" min="0" step="0.1"
+              value={thirtyBerryWeight}
+              onChange={e => setThirtyBerryWeight(e.target.value)}
+              placeholder="0"
+              style={{
+                background: 'transparent', border: 'none', padding: 0,
+                fontFamily: FONT, fontSize: 22, fontWeight: 700,
+                color: thirtyBerryWeight ? COLORS.text : COLORS.text3,
+                width: '80px', outline: 'none',
+              }}
+            />
+            {estimatedTotal && (
+              <div style={{
+                fontFamily: FONT, fontSize: 12, color: COLORS.green, fontWeight: 600,
+              }}>
+                ≈ {estimatedTotal} berries (estimated)
+              </div>
+            )}
+          </div>
+        </div>
       )}
 
-      {/* Good berries — auto-calculated */}
+      {/* Good berries — auto-calculated from total minus defects */}
       <div style={{
         background: COLORS.greenDim, border: `1px solid ${COLORS.green}`,
         borderRadius: 4, padding: '8px 12px', marginBottom: 8,
@@ -269,7 +517,7 @@ export default function CountEntry({ counts, setCounts, detailed, onToggleDetail
           <div style={{
             fontFamily: FONT, fontSize: 9, color: COLORS.green,
             textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2,
-          }}>Good Berries</div>
+          }}>Good Berries (total − defects)</div>
           <div style={{
             fontFamily: FONT, fontSize: 22, fontWeight: 700,
             color: COLORS.green,
@@ -287,12 +535,18 @@ export default function CountEntry({ counts, setCounts, detailed, onToggleDetail
               <div>{estimatedTotal} total</div>
             </>
           ) : (
-            <div>{isClam ? 'Enter total berry count' : 'Enter 30-berry weight'}</div>
+            <div>{isFullCount ? 'Snap photo for count' : isManual ? 'Enter total berry count' : 'Enter 30-berry weight'}</div>
           )}
         </div>
       </div>
 
       {/* Defect counts */}
+      <div style={{
+        fontFamily: FONT, fontSize: 9, fontWeight: 600, color: COLORS.text3,
+        textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4,
+      }}>
+        {detailed ? 'Defect Counts — Full Breakdown' : 'Defect Counts — 3-Pile Sort'}
+      </div>
       {!detailed ? (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
           {inputBox('permanent', 'Permanent', COLORS.amber)}

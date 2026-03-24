@@ -62,6 +62,38 @@ export const MBG_TOLERANCES = {
   combinedMax:  { excellent: 7, good: 10, fair: 14 },
 }
 
+// ============================================================
+// BUTTERFLY STANDARD — independent grading system
+// ============================================================
+// Philosophy: Retail-first. Tighter on condition defects — soft, leaky,
+// and decayed fruit has no place in quality retail packs. More lenient
+// on cosmetic permanent defects that consumers tolerate (stems, minor
+// color, scarring). What matters is what the customer opens.
+export const BUTTERFLY_TOLERANCES = {
+  permanent: {
+    stems:    { excellent: 5, good: 7, fair: 10 },
+    greenRed: { excellent: 6, good: 8, fair: 10 },
+    scars:    { excellent: 5, good: 7, fair: 10 },
+    totalMax: { excellent: 6, good: 8, fair: 10 },
+  },
+  condition: {
+    shrivel:  { excellent: 2, good: 3, fair: 5 },
+    bruise:   { excellent: 2, good: 3, fair: 5 },
+    soft:     { excellent: 1, good: 2, fair: 3 },   // soft fruit is unacceptable
+    crushed:  { excellent: 1, good: 1, fair: 2 },
+    decay:    { excellent: 0, good: 0.5, fair: 1 }, // near-zero tolerance
+    whiteMold:{ excellent: 0, good: 0, fair: 0 },   // any = Poor
+    leaky:    { excellent: 0, good: 1, fair: 2 },   // leaky has no place in quality fruit
+    totalMax: { excellent: 3, good: 4, fair: 5 },
+  },
+  combinedMax:  { excellent: 8, good: 11, fair: 14 },
+}
+
+export const GRADING_STANDARDS = {
+  mbg:       { key: 'mbg',       label: 'MBG',       tolerances: MBG_TOLERANCES },
+  butterfly: { key: 'butterfly', label: 'BUTTERFLY',  tolerances: BUTTERFLY_TOLERANCES },
+}
+
 // Berry size from 30-berry sample weight
 export const BERRY_SIZE = {
   small:  { maxWeight: 33, maxMM: 13, label: 'Small' },
@@ -81,24 +113,30 @@ export const FIRMNESS = {
 export const PACK_CRITERIA = {
   standard: {
     label: 'Standard',
-    description: 'MBG tolerance chart',
+    description: 'Grading standard tolerance chart only',
     minGrade: null,
     min30BerryWeight: null,
+    minBerryMM: null,
     minBaxlo: null,
+    spec: null,
   },
   mightyBlue: {
     label: 'Mighty Blue',
-    description: 'Good/Excellent + all berries 19mm+',
+    description: 'Good/Excellent + Large berries (19mm+)',
     minGrade: 'good',
-    min30BerryWeight: 66, // ≥66g = ≥18mm (large)
+    min30BerryWeight: 66, // ≥66g for 30 berries = ≥2.2g avg = ≥19mm
+    minBerryMM: 19,
     minBaxlo: null,
+    spec: 'Grade: Good or Excellent · Berry size: 19mm+ (Large) · 30-berry weight: 66g+',
   },
   sweetSelections: {
     label: 'Sweet Selections',
-    description: 'Excellent + Baxlo >75 + all berries 14mm+',
+    description: 'Excellent + Medium+ berries (14mm+) + Firm (Baxlo >75)',
     minGrade: 'excellent',
-    min30BerryWeight: 34, // ≥34g = ≥14mm (medium+)
+    min30BerryWeight: 34, // ≥34g for 30 berries = ≥1.13g avg = ≥14mm
+    minBerryMM: 14,
     minBaxlo: 75,
+    spec: 'Grade: Excellent · Berry size: 14mm+ (Medium or larger) · 30-berry weight: 34g+ · Baxlo firmness: >75',
   },
 }
 
@@ -139,15 +177,16 @@ export const DEFECT_DETAIL = {
 // ============================================================
 
 /**
- * Grade a sample against MBG standard.
+ * Grade a sample against a tolerance standard.
  *
  * Lean mode: counts = { good, permanent, condition, decay }
  * Detailed mode: counts include breakdown keys (stems, greenRed, etc.)
  *
  * @param {Object} counts - berry counts per category
+ * @param {Object} [tolerances] - tolerance table (default: MBG_TOLERANCES)
  * @returns {Object} full grade result with grade, percentages, headroom
  */
-export function gradeSample(counts) {
+export function gradeSample(counts, tolerances) {
   const good = counts.good || 0
 
   // Support both lean (3 piles) and detailed counts
@@ -189,7 +228,7 @@ export function gradeSample(counts) {
   const pctDecay = (decayTotal / total) * 100
   const pctCombined = (totalDefects / total) * 100
 
-  const tol = MBG_TOLERANCES
+  const tol = tolerances || MBG_TOLERANCES
 
   // Detailed sub-percentages (only meaningful when individual defect keys are provided)
   // If ANY detailed key exists, we're in detailed mode

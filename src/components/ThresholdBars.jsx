@@ -1,8 +1,8 @@
 import React from 'react'
 import { COLORS, FONT, gradeSample } from '../constants'
 
-export default function ThresholdBars({ counts }) {
-  const result = gradeSample(counts)
+export default function ThresholdBars({ counts, tolerances }) {
+  const result = gradeSample(counts, tolerances)
   const hasData = result.total > 0 && result.headrooms
 
   return (

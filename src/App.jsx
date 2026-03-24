@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react'
-import { COLORS, FONT, gradeSample, PACK_CRITERIA, GRADE_RANK } from './constants'
+import { COLORS, FONT, gradeSample, PACK_CRITERIA, GRADE_RANK, GRADING_STANDARDS } from './constants'
 import { loadFeatures, saveFeatures } from './featureFlags'
 import { loadReceipts } from './receipts'
 import { useRelay } from './useRelay'
@@ -96,7 +96,8 @@ function Dashboard() {
   const [showPackLog, setShowPackLog] = useState(false)
   const [showPackCodes, setShowPackCodes] = useState(false)
   const [detailedCounts, setDetailedCounts] = useState(false)
-  const [sampleMethod, setSampleMethod] = useState('600g') // '600g' or 'clamshell'
+  const [sampleMethod, setSampleMethod] = useState('600g') // '600g', 'manual', or 'fullcount'
+  const [gradingStandard, setGradingStandard] = useState('mbg') // 'mbg' or 'butterfly'
   const [showPalletCloseOut, setShowPalletCloseOut] = useState(false)
   const [showPackout, setShowPackout] = useState(false)
   const [showDCReconcile, setShowDCReconcile] = useState(false)
@@ -610,20 +611,30 @@ function Dashboard() {
             background: COLORS.bg,
           }}>
             {/* Pack criteria */}
-            <div style={{ display: 'flex', gap: 4 }}>
-              {Object.entries(PACK_CRITERIA).map(([key, pc]) => (
-                <button key={key} onClick={() => setPackCriteria(key)}
-                  title={pc.description}
-                  style={{
-                    fontFamily: FONT, fontSize: 10, fontWeight: 600,
-                    color: packCriteria === key ? COLORS.green : COLORS.text3,
-                    background: packCriteria === key ? COLORS.greenDim : 'transparent',
-                    border: `1px solid ${packCriteria === key ? COLORS.green : COLORS.border}`,
-                    padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
-                  }}>
-                  {pc.label}
-                </button>
-              ))}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <div style={{ display: 'flex', gap: 4 }}>
+                {Object.entries(PACK_CRITERIA).map(([key, pc]) => (
+                  <button key={key} onClick={() => setPackCriteria(key)}
+                    title={pc.description}
+                    style={{
+                      fontFamily: FONT, fontSize: 10, fontWeight: 600,
+                      color: packCriteria === key ? COLORS.green : COLORS.text3,
+                      background: packCriteria === key ? COLORS.greenDim : 'transparent',
+                      border: `1px solid ${packCriteria === key ? COLORS.green : COLORS.border}`,
+                      padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
+                    }}>
+                    {pc.label}
+                  </button>
+                ))}
+              </div>
+              {PACK_CRITERIA[packCriteria]?.spec && (
+                <div style={{
+                  fontFamily: FONT, fontSize: 9, color: COLORS.green,
+                  letterSpacing: '0.02em',
+                }}>
+                  {PACK_CRITERIA[packCriteria].spec}
+                </div>
+              )}
             </div>
 
             <div style={{ flex: 1 }} />
@@ -750,7 +761,9 @@ function Dashboard() {
                 detailed={detailedCounts}
                 onToggleDetailed={() => setDetailedCounts(!detailedCounts)}
                 sampleMethod={sampleMethod}
-                onToggleMethod={() => setSampleMethod(prev => prev === '600g' ? 'clamshell' : '600g')}
+                onToggleMethod={() => setSampleMethod(prev => prev === 'fullcount' ? '600g' : prev === '600g' ? 'manual' : 'fullcount')}
+                gradingStandard={gradingStandard}
+                onToggleStandard={() => setGradingStandard(prev => prev === 'mbg' ? 'butterfly' : 'mbg')}
               />
 
               {/* Action buttons */}
@@ -908,7 +921,7 @@ function Dashboard() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                 <ShareButton label="Share QC Data" getSnapshot={() => {
-                  const gradeResult = gradeSample(counts)
+                  const gradeResult = gradeSample(counts, GRADING_STANDARDS[gradingStandard].tolerances)
                   const lotSamples = history.filter(s => s.lotId === lotId)
                   const official = lotSamples.filter(s => !s.isExtra && !s.isSkipped)
                   const packLog = JSON.parse(localStorage.getItem('bc_packlog') || '[]')
@@ -924,13 +937,13 @@ function Dashboard() {
                         lotSummary: {
                           lotId,
                           sampleCount: official.length,
-                          grade: official.length > 0 ? gradeSample(averageCounts(official)) : null,
-                          pctCombined: official.length > 0 ? gradeSample(averageCounts(official)).pctCombined : 0,
+                          grade: official.length > 0 ? gradeSample(averageCounts(official), GRADING_STANDARDS[gradingStandard].tolerances) : null,
+                          pctCombined: official.length > 0 ? gradeSample(averageCounts(official), GRADING_STANDARDS[gradingStandard].tolerances).pctCombined : 0,
                           samples: [1,2,3].map(n => {
                             const s = lotSamples.find(x => x.sampleNum === n)
                             if (!s) return { layer: ['BTM','MID','TOP'][n-1], isSkipped: true }
                             if (s.isSkipped) return { layer: ['BTM','MID','TOP'][n-1], isSkipped: true }
-                            return { layer: ['BTM','MID','TOP'][n-1], grade: gradeSample(s).label }
+                            return { layer: ['BTM','MID','TOP'][n-1], grade: gradeSample(s, GRADING_STANDARDS[gradingStandard].tolerances).label }
                           }),
                         },
                       },
@@ -945,8 +958,8 @@ function Dashboard() {
                   }
                 }} />
               </div>
-              <ScoreDisplay counts={counts} packCriteria={packCriteria} />
-              <ThresholdBars counts={counts} />
+              <ScoreDisplay counts={counts} packCriteria={packCriteria} tolerances={GRADING_STANDARDS[gradingStandard].tolerances} />
+              <ThresholdBars counts={counts} tolerances={GRADING_STANDARDS[gradingStandard].tolerances} />
               <LotSummary lotId={lotId} history={history} />
             </div>
           </div>
@@ -1027,7 +1040,7 @@ function Dashboard() {
           )}
           {features.opsPanel !== false && (
             <OpsPanel
-              berryScore={(() => { const r = gradeSample(counts); return r.score })()}
+              berryScore={(() => { const r = gradeSample(counts, GRADING_STANDARDS[gradingStandard].tolerances); return r.score })()}
               history={history}
               lotId={lotId}
             />

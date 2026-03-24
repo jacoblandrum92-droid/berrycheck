@@ -9,8 +9,8 @@ const GRADE_COLORS = {
   none: '#999',
 }
 
-export default function ScoreDisplay({ counts, packCriteria }) {
-  const result = gradeSample(counts)
+export default function ScoreDisplay({ counts, packCriteria, tolerances }) {
+  const result = gradeSample(counts, tolerances)
   const hasData = result.total > 0
 
   const gradeColor = GRADE_COLORS[result.status] || COLORS.text3
@@ -81,7 +81,7 @@ export default function ScoreDisplay({ counts, packCriteria }) {
           <div style={{
             fontFamily: FONT, fontSize: 9, color: COLORS.text3,
             textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 6,
-          }}>MBG Grade</div>
+          }}>{tolerances ? 'Grade' : 'MBG Grade'}</div>
           <div style={{
             fontFamily: FONT, fontSize: 42, fontWeight: 700,
             color: gradeColor, lineHeight: 1, marginBottom: 4,
@@ -158,33 +158,47 @@ export default function ScoreDisplay({ counts, packCriteria }) {
           background: packCheck.pass ? COLORS.greenDim : COLORS.redDim,
           border: `1px solid ${packCheck.pass ? COLORS.green : COLORS.red}`,
           borderRadius: 6, padding: '10px 14px',
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         }}>
-          <div>
+          <div style={{
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            marginBottom: packCheck.issues.length > 0 ? 6 : 0,
+          }}>
             <div style={{
               fontFamily: FONT, fontSize: 10, fontWeight: 700,
               color: packCheck.pass ? COLORS.green : COLORS.red,
               letterSpacing: '0.06em', textTransform: 'uppercase',
-              marginBottom: 2,
             }}>
               {packCheck.label}: {packCheck.pass ? 'PASS' : 'DOES NOT QUALIFY'}
             </div>
-            {packCheck.issues.length > 0 && (
-              <div style={{
-                fontFamily: FONT, fontSize: 10,
-                color: packCheck.pass ? COLORS.green : COLORS.red,
-                opacity: 0.8,
-              }}>
-                {packCheck.issues.join(' · ')}
-              </div>
-            )}
+            <div style={{
+              fontFamily: FONT, fontSize: 9, color: COLORS.text3,
+              fontStyle: 'italic',
+            }}>
+              Fruit grade stands — pack spec is separate
+            </div>
           </div>
-          <div style={{
-            fontFamily: FONT, fontSize: 9, color: COLORS.text3,
-            fontStyle: 'italic',
-          }}>
-            Fruit grade stands — pack spec is separate
-          </div>
+          {/* Spec requirements */}
+          {pc.spec && (
+            <div style={{
+              fontFamily: FONT, fontSize: 9, color: COLORS.text2,
+              marginBottom: packCheck.issues.length > 0 ? 6 : 0,
+              lineHeight: 1.4,
+            }}>
+              {pc.spec}
+            </div>
+          )}
+          {/* Current issues */}
+          {packCheck.issues.length > 0 && (
+            <div style={{
+              fontFamily: FONT, fontSize: 10,
+              color: packCheck.pass ? COLORS.green : COLORS.red,
+              opacity: 0.8,
+            }}>
+              {packCheck.issues.map((issue, i) => (
+                <div key={i}>· {issue}</div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
