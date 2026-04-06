@@ -6,7 +6,3 @@ snapshots/
 berry_hsv_values.json
 package-lock.json
 .claude/
-__pycache__/
-*.pyc
-app/data/
-machine/buffer/

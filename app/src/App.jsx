@@ -1,0 +1,1397 @@
+import React, { useState, useCallback, useEffect } from 'react'
+import { COLORS, FONT, gradeSample, PACK_CRITERIA, GRADE_RANK, GRADING_STANDARDS } from './constants'
+
+// Server-backed storage helper — write to both localStorage and server
+function serverSave(key, data) {
+  fetch('/api/store/' + key, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  }).catch(() => {})
+}
+import { loadFeatures, saveFeatures } from './featureFlags'
+import { loadReceipts } from './receipts'
+import { useRelay } from './useRelay'
+import { countBerriesInZones } from './imageProcessor'
+import { ensureLandscape } from './rotateImage'
+import Header from './components/Header'
+import ScoreDisplay from './components/ScoreDisplay'
+import CountEntry from './components/CountEntry'
+import ScaleCapture from './components/ScaleCapture'
+import ThresholdBars from './components/ThresholdBars'
+import SampleHistory from './components/SampleHistory'
+import LotSummary from './components/LotSummary'
+import OpsPanel from './components/OpsPanel'
+import CameraCapture from './components/CameraCapture'
+import PhoneCapture from './components/PhoneCapture'
+import ZoneEditor from './components/ZoneEditor'
+import AccuracyReport from './components/AccuracyReport'
+import LogManager from './components/LogManager'
+import DumpScanner from './components/DumpScanner'
+import ReceiptManager from './components/ReceiptManager'
+import BarcodeSheet from './components/BarcodeSheet'
+import LineMonitor from './components/LineMonitor'
+import GradingGuide from './components/GradingGuide'
+import QCSetupBar from './components/QCSetupBar'
+import PalletBuilder from './components/PalletBuilder'
+import BackupForm from './components/BackupForm'
+import Viewer from './components/Viewer'
+import DailyView from './components/DailyView'
+import ShareButton from './components/ShareButton'
+import PackLogViewer, { PackLogInput } from './components/PackLog'
+import PackCodeManager from './components/PackCodeManager'
+import PalletCloseOut from './components/PalletCloseOut'
+import ReceiptChange from './components/ReceiptChange'
+import SpeedQuality from './components/SpeedQuality'
+import GrowerTrends from './components/GrowerTrends'
+import GrowerFilter from './components/GrowerFilter'
+import PackPlan from './components/PackPlan'
+import PackoutReport from './components/PackoutReport'
+import DCReconcile from './components/DCReconcile'
+import FeaturePanel from './components/FeaturePanel'
+import ComplianceLog from './components/ComplianceLog'
+import WeatherBanner from './components/WeatherBanner'
+import DayClose from './components/DayClose'
+import ChemicalInventory from './components/ChemicalInventory'
+import ChemicalLog from './components/ChemicalLog'
+import PrePackNotes, { PrePackBanner } from './components/PrePackNotes'
+import CameraTuner from './components/CameraTuner'
+import ZoneConfirm from './components/ZoneConfirm'
+
+export default function App() {
+  const mode = new URLSearchParams(window.location.search).get('mode')
+  if (mode === 'phone') return <PhoneCapture />
+  if (mode === 'dump') return <DumpScanner />
+  if (mode === 'view') return <Viewer />
+  if (mode === 'daily') return <DailyView />
+  return <Dashboard />
+}
+
+const FONT_SCALES = { small: 0.85, normal: 1, large: 1.2 }
+
+function Dashboard() {
+  const [view, setView] = useState('qc')
+  const [features, setFeatures] = useState(loadFeatures)
+  const [showFeatures, setShowFeatures] = useState(false)
+  const [fontScale, setFontScale] = useState(() => {
+    return localStorage.getItem('bc_font_scale') || 'normal'
+  })
+
+  // Sync from server on mount — pull shared data into localStorage
+  const [synced, setSynced] = useState(false)
+  useEffect(() => {
+    const keys = ['bc_history', 'bc_packlog', 'bc_receipts', 'bc_packplan',
+      'bc_prepack', 'bc_dc_results', 'bc_features', 'bc_packcodes_db',
+      'bc_packcodes_favorites', 'bc_zones', 'bc_accuracy', 'bc_training',
+      'bc_compliance_config', 'bc_compliance_done']
+    Promise.all(keys.map(key =>
+      fetch('/api/store/' + key).then(r => r.json()).then(data => {
+        if (data !== null) localStorage.setItem(key, JSON.stringify(data))
+      }).catch(() => {})
+    )).then(() => {
+      // Reload state from now-hydrated localStorage
+      setFeatures(loadFeatures())
+      try { setHistory(JSON.parse(localStorage.getItem('bc_history') || '[]')) } catch {}
+      setSynced(true)
+    })
+  }, [])
+
+  // Persist features on change
+  useEffect(() => { saveFeatures(features) }, [features])
+
+  // Daily pallet number — auto-generated from pack log
+  const [dailyPalletNum, setDailyPalletNum] = useState(() => {
+    try {
+      const today = new Date().toLocaleDateString()
+      const log = JSON.parse(localStorage.getItem('bc_packlog') || '[]')
+      return log.filter(e => e.date === today).reduce((max, e) => Math.max(max, e.dailyPallet || 0), 0) + 1
+    } catch { return 1 }
+  })
+
+  // Lot info
+  const [lotId, setLotId] = useState('')
+  const [receiptNum, setReceiptNum] = useState('')
+  const [grower, setGrower] = useState('')
+  const [variety, setVariety] = useState('')
+  const [packCriteria, setPackCriteria] = useState('standard')
+  const [lineRate, setLineRate] = useState('')
+  const [blowoff, setBlowoff] = useState('')
+  const [sizeDiversion, setSizeDiversion] = useState('')
+  // Counts
+  const [counts, setCounts] = useState({ good: 0, permanent: 0, condition: 0, decay: 0 })
+  // Scale weight capture — { weight: number, _source: 'scale'|'manual' } or null
+  const [capturedWeight, setCapturedWeight] = useState(null)
+
+  // Incoming image from phone
+  const [incomingImage, setIncomingImage] = useState(null)
+  const [processing, setProcessing] = useState(false)
+
+  // A/B tracking — computer counts (A) vs operator-corrected counts (B)
+  const [computerCounts, setComputerCounts] = useState(null)
+
+  // Zone editor & accuracy report
+  const [showZoneEditor, setShowZoneEditor] = useState(false)
+  const [showAccuracy, setShowAccuracy] = useState(false)
+  const [showLogManager, setShowLogManager] = useState(false)
+  const [showChemicals, setShowChemicals] = useState(false)
+  const [showChemLog, setShowChemLog] = useState(false)
+  const [showReceipts, setShowReceipts] = useState(false)
+  const [showBarcodeSheet, setShowBarcodeSheet] = useState(false)
+  const [showGradingGuide, setShowGradingGuide] = useState(false)
+  const [showPhoneQR, setShowPhoneQR] = useState(false)
+  const [pendingZoneCounts, setPendingZoneCounts] = useState(null) // { counts, image, zones }
+  const [showPackLog, setShowPackLog] = useState(false)
+  const [showPackCodes, setShowPackCodes] = useState(false)
+  const [detailedCounts, setDetailedCounts] = useState(true)
+  const [sampleMethod, setSampleMethod] = useState('fullcount') // 'fullcount', '600g', or 'manual'
+  const [gradingStandard, setGradingStandard] = useState('mbg') // 'mbg' or 'butterfly'
+  const [showPalletCloseOut, setShowPalletCloseOut] = useState(false)
+  const [showPackout, setShowPackout] = useState(false)
+  const [showDCReconcile, setShowDCReconcile] = useState(false)
+  const [showPrePack, setShowPrePack] = useState(false)
+  const [showReceiptChange, setShowReceiptChange] = useState(false)
+  const [palletReceipts, setPalletReceipts] = useState([]) // tracks receipt segments on current pallet
+  const [packCode, setPackCode] = useState('')
+  const [lastPackCode, setLastPackCode] = useState('')
+  const [showBackupForm, setShowBackupForm] = useState(false)
+  const [showLineStats, setShowLineStats] = useState(null) // 'mid-sample' or 'close-out'
+  const [palletLineStats, setPalletLineStats] = useState(null) // stored once captured
+
+  // Training mode toggle — when ON, A/B data is saved for accuracy tracking
+  const [trainingMode, setTrainingMode] = useState(() => {
+    return localStorage.getItem('bc_training') === 'true'
+  })
+  const toggleTraining = () => {
+    const next = !trainingMode
+    setTrainingMode(next)
+    localStorage.setItem('bc_training', next.toString())
+    serverSave('bc_training', next)
+  }
+
+  // Sample history
+  const [history, setHistory] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('bc_history') || '[]') } catch { return [] }
+  })
+
+  const getSavedZones = () => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('bc_zones') || '[]')
+      const validKeys = ['good', 'permanent', 'condition', 'decay']
+      return saved.filter(z => validKeys.includes(z.key))
+    } catch { return [] }
+  }
+
+  // Handle incoming image from phone
+  const handleRelayImage = useCallback(async (imageData, timestamp) => {
+    // Rotate portrait to landscape
+    const landscapeData = await ensureLandscape(imageData)
+    setIncomingImage({ data: landscapeData, timestamp })
+
+    // Auto-process if we have saved zones — hold for confirmation
+    const zones = getSavedZones()
+    if (zones.length > 0) {
+      setProcessing(true)
+      try {
+        const result = await countBerriesInZones(landscapeData, zones)
+        // Don't apply yet — show confirmation overlay
+        setPendingZoneCounts({ counts: result.counts, image: landscapeData, zones })
+        setComputerCounts({ ...result.counts })
+      } catch (err) {
+        console.error('Auto-process error:', err)
+      } finally {
+        setProcessing(false)
+      }
+    }
+  }, [])
+
+  const confirmZoneCounts = useCallback(() => {
+    if (!pendingZoneCounts) return
+    const zc = pendingZoneCounts.counts
+    const total = (zc.good || 0) + (zc.permanent || 0) + (zc.condition || 0) + (zc.decay || 0)
+    setCounts(prev => ({
+      ...prev,
+      good: zc.good || 0,
+      permanent: zc.permanent || 0,
+      condition: zc.condition || 0,
+      decay: zc.decay || 0,
+      _fullcountTotal: total,
+      _sampleMethod: 'fullcount',
+      _source: 'phone',
+    }))
+    // Auto-set to fullcount + quick mode (phone zones = 3-pile summary counts)
+    if (sampleMethod !== 'fullcount') setSampleMethod('fullcount')
+    if (detailedCounts) setDetailedCounts(false)
+    setPendingZoneCounts(null)
+  }, [pendingZoneCounts, sampleMethod, detailedCounts])
+
+  // Sync handler — when another device saves data, pull fresh copy
+  const handleSync = useCallback((key) => {
+    fetch('/api/store/' + key).then(r => r.json()).then(data => {
+      if (data === null) return
+      localStorage.setItem(key, JSON.stringify(data))
+      // Update React state for keys we hold in state
+      if (key === 'bc_history') try { setHistory(data) } catch {}
+      if (key === 'bc_features') try { setFeatures(typeof data === 'object' ? { ...loadFeatures(), ...data } : loadFeatures()) } catch {}
+    }).catch(() => {})
+  }, [])
+
+  const { connected, phonesOnline, graderConnected, scaleConnected, scaleWeight, scalePort, sendScaleCommand, wsRef } = useRelay('dashboard', handleRelayImage, handleSync)
+
+  // Push daily summary to server for viewer/archive access
+  const pushDailySummary = useCallback((h) => {
+    const today = new Date().toLocaleDateString()
+    const todaySamples = h.filter(s => s.date === today)
+
+    // Group by pallet
+    const palletMap = {}
+    todaySamples.forEach(s => {
+      if (!s.lotId) return
+      if (!palletMap[s.lotId]) {
+        palletMap[s.lotId] = {
+          lotId: s.lotId, receiptNum: s.receiptNum, grower: s.grower,
+          variety: s.variety, time: s.time,
+          lineRate: s.lineRate, blowoff: s.blowoff, sizeDiversion: s.sizeDiversion,
+          dcStrictness: null, isMissed: false,
+          samples: [],
+        }
+      }
+      palletMap[s.lotId].samples.push(s)
+      if (s.lineRate) palletMap[s.lotId].lineRate = s.lineRate
+      if (s.sizeDiversion != null) palletMap[s.lotId].sizeDiversion = s.sizeDiversion
+      if (s.blowoff != null) palletMap[s.lotId].blowoff = s.blowoff
+      if (s.isMissed) palletMap[s.lotId].isMissed = true
+    })
+
+    // Grade each pallet
+    const pallets = Object.values(palletMap).map(p => {
+      const official = p.samples.filter(s => !s.isExtra && !s.isSkipped)
+      if (official.length === 0) return { ...p, grade: p.isMissed ? 'MISSED' : '—', pctCombined: 0 }
+      const avg = {}
+      for (const key of ['good', 'permanent', 'condition', 'decay']) {
+        avg[key] = Math.round((official.reduce((a, s) => a + (s[key] || 0), 0) / official.length) * 10) / 10
+      }
+      const result = gradeSample(avg)
+      return { ...p, grade: result.label, pctCombined: result.pctCombined, samples: undefined }
+    })
+
+    // Day averages
+    const withRate = pallets.filter(p => p.lineRate)
+    const withBlowoff = pallets.filter(p => p.blowoff != null)
+    const avgLineRate = withRate.length > 0 ? withRate.reduce((s, p) => s + p.lineRate, 0) / withRate.length : null
+    const avgBlowoff = withBlowoff.length > 0
+      ? Math.round((withBlowoff.reduce((s, p) => s + p.blowoff, 0) / withBlowoff.length) * 10) / 10
+      : null
+
+    // Try to get DC strictness from localStorage
+    let dcStrictness = null
+    try { dcStrictness = parseInt(localStorage.getItem('bc_dc_strictness') || '3') } catch {}
+    pallets.forEach(p => { if (!p.dcStrictness) p.dcStrictness = dcStrictness })
+
+    fetch('/api/daily', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date: today, data: { pallets, avgLineRate, avgBlowoff } }),
+    }).catch(() => {})
+  }, [])
+
+  const saveHistory = useCallback((h) => {
+    setHistory(h)
+    localStorage.setItem('bc_history', JSON.stringify(h))
+    serverSave('bc_history', h)
+    pushDailySummary(h)
+  }, [])
+
+  // Save accuracy log (A/B comparisons) to localStorage
+  const saveAccuracyLog = useCallback((entry) => {
+    try {
+      const log = JSON.parse(localStorage.getItem('bc_accuracy') || '[]')
+      log.push(entry)
+      localStorage.setItem('bc_accuracy', JSON.stringify(log))
+      serverSave('bc_accuracy', log)
+    } catch {}
+  }, [])
+
+  const doLogSample = useCallback((isExtra) => {
+    const totalB = (counts.good || 0) + (counts.permanent || 0) +
+      (counts.condition || 0) + (counts.decay || 0)
+    if (!totalB) return
+
+    // Count how many official (non-extra) samples exist for this lot
+    const officialCount = history.filter(s => s.lotId === lotId && !s.isExtra).length
+
+    // Check for receipt bounceback on official samples
+    // If this receipt was used, then a different one was used, and now this one is back — flag it
+    let receiptWarning = null
+    if (!isExtra && receiptNum) {
+      const officialSamples = history.filter(s => s.lotId === lotId && !s.isExtra && !s.isSkipped)
+      if (officialSamples.length >= 2) {
+        const receiptSequence = officialSamples.map(s => s.receiptNum)
+        const lastReceipt = receiptSequence[receiptSequence.length - 1]
+        const prevReceipts = receiptSequence.slice(0, -1)
+        // Current receipt matches an older one but not the most recent — it bounced back
+        if (lastReceipt !== receiptNum && prevReceipts.includes(receiptNum)) {
+          receiptWarning = `Receipt ${receiptNum} was used earlier, then switched to ${lastReceipt}, and is now back. This is unusual — verify the correct receipt is selected.`
+        }
+      }
+    }
+
+    if (receiptWarning) {
+      const proceed = confirm(`WARNING: ${receiptWarning}\n\nDo you want to continue logging this sample under ${receiptNum}?`)
+      if (!proceed) return
+    }
+
+    const sample = {
+      id: Date.now(),
+      time: new Date().toLocaleTimeString('en-US', { hour12: false }),
+      date: new Date().toLocaleDateString(),
+      lotId, dailyPalletNum, receiptNum, grower, variety, packCriteria,
+      ...counts,
+      isExtra,
+      sampleNum: isExtra ? null : officialCount + 1,
+      receiptWarning: receiptWarning || null,
+      computerCounts: computerCounts || null,
+      wasEdited: computerCounts ? JSON.stringify(counts) !== JSON.stringify(computerCounts) : null,
+    }
+    saveHistory([...history, sample])
+
+    // Log A/B comparison for accuracy tracking (only in training mode)
+    if (computerCounts && trainingMode) {
+      saveAccuracyLog({
+        id: sample.id,
+        time: sample.time,
+        date: sample.date,
+        a: computerCounts,
+        b: counts,
+        edited: sample.wasEdited,
+        isExtra,
+      })
+    }
+
+    setCounts({ good: 0, permanent: 0, condition: 0, decay: 0 })
+    setCapturedWeight(null)
+    setComputerCounts(null)
+    setIncomingImage(null)
+
+    const layerNames = { 1: 'BOTTOM LAYER', 2: 'MIDDLE LAYER', 3: 'TOP LAYER' }
+
+    if (!isExtra && sample.sampleNum >= 3) {
+      // 3/3 complete — go to close-out
+      setShowPalletCloseOut(true)
+    } else if (!isExtra && sample.sampleNum === 2) {
+      // Middle layer — show inline line stats prompt (non-blocking)
+      setShowLineStats('mid-sample')
+    }
+
+    // No alert — static reminder is always visible below the action buttons
+  }, [counts, computerCounts, lotId, receiptNum, grower, variety, history, saveHistory, saveAccuracyLog, trainingMode])
+
+  const logSample = useCallback(() => doLogSample(false), [doLogSample])
+  const logExtraSample = useCallback(() => doLogSample(true), [doLogSample])
+
+  // Skip a layer — logs a blank placeholder so the layer counter advances
+  const skipLayer = useCallback(() => {
+    const officialCount = history.filter(s => s.lotId === lotId && !s.isExtra).length
+    if (officialCount >= 3) return
+    const layerNames = { 0: 'BOTTOM', 1: 'MIDDLE', 2: 'TOP' }
+    const sample = {
+      id: Date.now(),
+      time: new Date().toLocaleTimeString('en-US', { hour12: false }),
+      date: new Date().toLocaleDateString(),
+      lotId, receiptNum, grower, variety,
+      good: 0, permanent: 0, condition: 0, decay: 0,
+      isExtra: false,
+      isSkipped: true,
+      sampleNum: officialCount + 1,
+    }
+    saveHistory([...history, sample])
+    // No alert — visible in layer indicator
+  }, [lotId, receiptNum, grower, variety, history, saveHistory])
+
+  // Skip entire pallet — logs all remaining layers as skipped + pack log missed entry
+  const skipPallet = useCallback(() => {
+    if (!lotId) return alert('Set a pallet tag first')
+    if (!confirm(`Skip pallet ${lotId}? All samples will be marked as missed.`)) return
+
+    const officialCount = history.filter(s => s.lotId === lotId && !s.isExtra).length
+    const now = new Date()
+    const time = now.toLocaleTimeString('en-US', { hour12: false })
+    const date = now.toLocaleDateString()
+    const newSamples = []
+
+    // Log remaining layers as skipped
+    for (let i = officialCount; i < 3; i++) {
+      newSamples.push({
+        id: Date.now() + i,
+        time, date,
+        lotId, dailyPalletNum, receiptNum, grower, variety, packCriteria,
+        good: 0, permanent: 0, condition: 0, decay: 0,
+        isExtra: false, isSkipped: true, isMissed: true,
+        sampleNum: i + 1,
+      })
+    }
+
+    if (newSamples.length > 0) {
+      saveHistory([...history, ...newSamples])
+    }
+
+    // Log missed entry in pack log
+    try {
+      const packLog = JSON.parse(localStorage.getItem('bc_packlog') || '[]')
+      const todayEntries = packLog.filter(e => e.date === date)
+      const maxNum = todayEntries.reduce((max, e) => Math.max(max, e.dailyPallet || 0), 0)
+      packLog.push({
+        id: Date.now() + 10,
+        time, date,
+        packCode: '—',
+        receiptNum: receiptNum || '',
+        grower: grower || '',
+        palletNum: lotId,
+        dailyPallet: maxNum + 1,
+        boxes: 0,
+        isMissed: true,
+      })
+      localStorage.setItem('bc_packlog', JSON.stringify(packLog))
+      serverSave('bc_packlog', packLog)
+    } catch {}
+
+    // No alert — visible in the sample log
+  }, [lotId, receiptNum, grower, variety, packCriteria,
+      history, saveHistory])
+
+  // Pallet builder — add/update/remove receipts
+  const addReceiptToPallet = useCallback((receipt) => {
+    setPalletReceipts(prev => [...prev, receipt])
+    // Set current receipt to the one just added
+    setReceiptNum(receipt.receiptNum)
+    setGrower(receipt.grower)
+    setVariety(receipt.variety)
+  }, [])
+
+  const updateReceiptBoxes = useCallback((index, boxes) => {
+    setPalletReceipts(prev => prev.map((r, i) => i === index ? { ...r, boxes } : r))
+  }, [])
+
+  const removeReceiptFromPallet = useCallback((index) => {
+    setPalletReceipts(prev => prev.filter((_, i) => i !== index))
+  }, [])
+
+  const selectReceiptForQC = useCallback((receipt) => {
+    setReceiptNum(receipt.receiptNum)
+    setGrower(receipt.grower)
+    setVariety(receipt.variety)
+  }, [])
+
+  // Handle receipt change mid-pallet (legacy — kept for ReceiptChange modal)
+  const handleReceiptChange = useCallback((data) => {
+    // Record the outgoing receipt segment
+    setPalletReceipts(prev => [...prev, {
+      receiptNum, grower, variety,
+      boxes: data.outgoingBoxes,
+    }])
+    // Switch to new receipt
+    setReceiptNum(data.newReceiptNum)
+    setGrower(data.newGrower)
+    setVariety(data.newVariety)
+    setShowReceiptChange(false)
+  }, [receiptNum, grower, variety])
+
+  // Handle pallet close-out — saves composition to pack log
+  const handlePalletCloseOut = useCallback((palletData) => {
+    try {
+      const packLog = JSON.parse(localStorage.getItem('bc_packlog') || '[]')
+      const today = new Date().toLocaleDateString()
+      const time = new Date().toLocaleTimeString('en-US', { hour12: false })
+      const todayEntries = packLog.filter(e => e.date === today)
+      const maxNum = todayEntries.reduce((max, e) => Math.max(max, e.dailyPallet || 0), 0)
+      const dailyPallet = maxNum + 1
+
+      // Log each receipt on this pallet
+      palletData.entries.forEach((entry, i) => {
+        packLog.push({
+          id: Date.now() + i,
+          time, date: today,
+          packCode: palletData.packCode || '—',
+          receiptNum: entry.receiptNum,
+          grower: entry.grower,
+          variety: entry.variety,
+          palletNum: palletData.lotId,
+          dailyPallet,
+          boxes: entry.boxes,
+          isSplit: palletData.entries.length > 1,
+          lineRate: (palletLineStats || palletData).lineRate,
+          blowoff: (palletLineStats || palletData).blowoff,
+          sizeDiversion: (palletLineStats || palletData).sizeDiversion,
+          lineStatsCapturedAt: palletLineStats?.capturedAt || palletData.lineStatsCapturedAt || 'close-out',
+        })
+      })
+
+      localStorage.setItem('bc_packlog', JSON.stringify(packLog))
+      serverSave('bc_packlog', packLog)
+    } catch {}
+
+    setShowPalletCloseOut(false)
+    setPalletLineStats(null)
+    setShowLineStats(null)
+    // Advance daily pallet number for next pallet
+    setDailyPalletNum(prev => prev + 1)
+    // Reset for next pallet
+    setLotId('')
+    setReceiptNum('')
+    setGrower('')
+    setVariety('')
+    setPalletReceipts([])
+    setPackCode('')
+  }, [palletLineStats])
+
+  const clearHistory = useCallback(() => saveHistory([]), [saveHistory])
+
+  // Helper: average counts across samples for lot grading
+  const averageCounts = (samples) => {
+    if (samples.length === 0) return { good: 0, permanent: 0, condition: 0, decay: 0 }
+    const keys = ['good', 'permanent', 'condition', 'decay']
+    const avg = {}
+    for (const key of keys) {
+      avg[key] = Math.round((samples.reduce((a, s) => a + (s[key] || 0), 0) / samples.length) * 10) / 10
+    }
+    return avg
+  }
+
+  const onCameraResult = useCallback((zoneCounts) => {
+    setCounts(zoneCounts)
+    setView('qc')
+  }, [])
+
+  const onZoneCounts = useCallback((zoneCounts) => {
+    setCounts(zoneCounts)
+    setComputerCounts({ ...zoneCounts })
+    setShowZoneEditor(false)
+  }, [])
+
+  if (view === 'camera') {
+    return <CameraCapture onResult={onCameraResult} onBack={() => setView('qc')} />
+  }
+
+  const hasZones = getSavedZones().length > 0
+
+  return (
+    <div style={{
+      background: COLORS.bg, minHeight: '100vh',
+      color: COLORS.text, fontFamily: FONT, fontSize: 14,
+      zoom: FONT_SCALES[fontScale] || 1,
+    }}>
+      <Header
+        onOpenCamera={() => setView('camera')}
+        onResetZones={() => {
+          localStorage.removeItem('bc_zones')
+          alert('Zones cleared. Draw new zones on the next captured image.')
+        }}
+        onShowAccuracy={() => setShowAccuracy(true)}
+        onShowLogs={() => setShowLogManager(true)}
+        onShowReceipts={() => setShowReceipts(true)}
+        onShowPackLog={() => setShowPackLog(true)}
+        onShowPackCodes={() => setShowPackCodes(true)}
+        onShowBackupForm={() => setShowBackupForm(true)}
+        onShowPackout={() => setShowPackout(true)}
+        onShowDCReconcile={() => setShowDCReconcile(true)}
+        onShowPrePack={() => setShowPrePack(true)}
+        onShowFeatures={() => setShowFeatures(true)}
+        features={features}
+        trainingMode={trainingMode}
+        onToggleTraining={toggleTraining}
+        relayConnected={connected}
+        phonesOnline={phonesOnline}
+        graderConnected={graderConnected}
+        scaleConnected={scaleConnected}
+        scaleWeight={scaleWeight}
+        scalePort={scalePort}
+        onScaleTare={() => sendScaleCommand('tare')}
+        fontScale={fontScale}
+        onFontScale={(size) => { setFontScale(size); localStorage.setItem('bc_font_scale', size) }}
+      />
+
+      {/* Mode toggle */}
+      <div style={{
+        display: 'flex', borderBottom: `1px solid ${COLORS.border}`,
+        background: COLORS.bg2,
+      }}>
+        <button onClick={() => setView('qc')} style={{
+          flex: 1, fontFamily: FONT, fontSize: 12, fontWeight: 600,
+          letterSpacing: '0.08em', textTransform: 'uppercase',
+          padding: '10px 20px', cursor: 'pointer', border: 'none',
+          background: view === 'qc' ? COLORS.bg : COLORS.bg2,
+          color: view === 'qc' ? COLORS.green : COLORS.text3,
+          borderBottom: view === 'qc' ? `2px solid ${COLORS.green}` : '2px solid transparent',
+        }}>
+          QC Sample
+        </button>
+        <button onClick={() => setView('ops')} style={{
+          flex: 1, fontFamily: FONT, fontSize: 12, fontWeight: 600,
+          letterSpacing: '0.08em', textTransform: 'uppercase',
+          padding: '10px 20px', cursor: 'pointer', border: 'none',
+          background: view === 'ops' ? COLORS.bg : COLORS.bg2,
+          color: view === 'ops' ? COLORS.amber : COLORS.text3,
+          borderBottom: view === 'ops' ? `2px solid ${COLORS.amber}` : '2px solid transparent',
+        }}>
+          Operations
+        </button>
+      </div>
+
+      {view === 'qc' ? (
+        /* ========== QC MODE ========== */
+        <div style={{ minHeight: 'calc(100vh - 90px)' }}>
+          {/* Grade summary header — sticky at top */}
+          <div style={{
+            padding: '12px 32px', borderBottom: `1px solid ${COLORS.border}`,
+            position: 'sticky', top: 0, zIndex: 100,
+            background: COLORS.bg, boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+          }}>
+            <ScoreDisplay counts={counts} packCriteria={packCriteria} tolerances={GRADING_STANDARDS[gradingStandard].tolerances} />
+          </div>
+
+          {/* Weather context banner */}
+          <div style={{ padding: '4px 32px 0' }}>
+            <WeatherBanner />
+          </div>
+
+          {/* Pre-pack notes banner for active receipt */}
+          {receiptNum && (
+            <div style={{ padding: '0 32px' }}>
+              <PrePackBanner receiptNum={receiptNum} />
+            </div>
+          )}
+
+          {/* Pallet & pack management — collapsible */}
+          <details style={{ borderBottom: `1px solid ${COLORS.border}` }}>
+            <summary style={{
+              fontFamily: FONT, fontSize: 9, fontWeight: 600, color: COLORS.text3,
+              letterSpacing: '0.08em', textTransform: 'uppercase',
+              padding: '6px 32px', cursor: 'pointer', background: COLORS.bg,
+              listStyle: 'none', display: 'flex', alignItems: 'center', gap: 8,
+            }}>
+              <span style={{ fontSize: 8 }}>&#9654;</span> PALLET / PACK
+              {receiptNum && <span style={{ color: COLORS.green, fontWeight: 400, textTransform: 'none', letterSpacing: '0.02em' }}>— {receiptNum} {grower}</span>}
+              {lotId && (() => {
+                const officialCount = history.filter(s => s.lotId === lotId && !s.isExtra).length
+                const layerNames = { 0: '#1 BTM', 1: '#2 MID', 2: '#3 TOP' }
+                return <span style={{ color: officialCount >= 3 ? COLORS.amber : COLORS.green, fontWeight: 400, textTransform: 'none' }}>
+                  {officialCount >= 3 ? '3/3' : layerNames[officialCount]}
+                </span>
+              })()}
+            </summary>
+
+            <PalletBuilder
+              dailyPalletNum={dailyPalletNum}
+              palletTag={lotId} setPalletTag={setLotId}
+              palletReceipts={palletReceipts}
+              onAddReceipt={addReceiptToPallet}
+              onUpdateBoxes={updateReceiptBoxes}
+              onRemoveReceipt={removeReceiptFromPallet}
+              onSelectReceipt={selectReceiptForQC}
+              packCode={packCode} setPackCode={setPackCode}
+              currentReceiptNum={receiptNum}
+            />
+
+            {/* QC toolbar */}
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '6px 32px',
+              borderBottom: `1px solid ${COLORS.border}`,
+              background: COLORS.bg,
+            }}>
+              {features.receipts !== false && (
+                <button onClick={() => setShowReceipts(true)} style={{
+                  fontFamily: FONT, fontSize: 9, color: COLORS.amber,
+                  background: 'transparent', border: `1px solid ${COLORS.amberDim}`,
+                  padding: '3px 10px', borderRadius: 3, cursor: 'pointer',
+                  letterSpacing: '0.06em',
+                }}>RECEIPTS</button>
+              )}
+              <button onClick={() => setShowPackCodes(true)} style={{
+                fontFamily: FONT, fontSize: 9, color: COLORS.text3,
+                background: 'transparent', border: `1px solid ${COLORS.border}`,
+                padding: '3px 10px', borderRadius: 3, cursor: 'pointer',
+                letterSpacing: '0.06em',
+              }}>PACK CODES</button>
+              <button onClick={() => setShowPrePack(true)} style={{
+                fontFamily: FONT, fontSize: 9, color: COLORS.green,
+                background: 'transparent', border: `1px solid ${COLORS.greenDim}`,
+                padding: '3px 10px', borderRadius: 3, cursor: 'pointer',
+                letterSpacing: '0.06em',
+              }}>PRE-PACK</button>
+            </div>
+
+            {/* Pack plan */}
+            {features.packPlan !== false && (
+              <div style={{ padding: '6px 32px' }}>
+                <PackPlan packLog={(() => {
+                  try { return JSON.parse(localStorage.getItem('bc_packlog') || '[]') } catch { return [] }
+                })()} />
+              </div>
+            )}
+
+            {/* Pack criteria + layer indicator */}
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 12,
+              padding: '6px 32px', borderBottom: `1px solid ${COLORS.border}`,
+              background: COLORS.bg,
+            }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <div style={{ display: 'flex', gap: 4 }}>
+                  {Object.entries(PACK_CRITERIA).map(([key, pc]) => (
+                    <button key={key} onClick={() => setPackCriteria(key)}
+                      title={pc.description}
+                      style={{
+                        fontFamily: FONT, fontSize: 10, fontWeight: 600,
+                        color: packCriteria === key ? COLORS.green : COLORS.text3,
+                        background: packCriteria === key ? COLORS.greenDim : 'transparent',
+                        border: `1px solid ${packCriteria === key ? COLORS.green : COLORS.border}`,
+                        padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
+                      }}>
+                      {pc.label}
+                    </button>
+                  ))}
+                </div>
+                {PACK_CRITERIA[packCriteria]?.spec && (
+                  <div style={{ fontFamily: FONT, fontSize: 9, color: COLORS.green, letterSpacing: '0.02em' }}>
+                    {PACK_CRITERIA[packCriteria].spec}
+                  </div>
+                )}
+              </div>
+              <div style={{ flex: 1 }} />
+              {(() => {
+                const officialCount = lotId ? history.filter(s => s.lotId === lotId && !s.isExtra).length : 0
+                const layerNames = { 0: '#1 BOTTOM', 1: '#2 MIDDLE', 2: '#3 TOP' }
+                return (
+                  <div style={{ fontFamily: FONT, fontSize: 11, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {officialCount < 3 ? (
+                      <span style={{ color: COLORS.green, fontWeight: 600 }}>NEXT: {layerNames[officialCount] || 'SAMPLE'}</span>
+                    ) : (
+                      <span style={{ color: COLORS.amber, fontWeight: 600 }}>3/3 DONE</span>
+                    )}
+                    {officialCount < 3 && (
+                      <>
+                        <button onClick={skipLayer} style={{
+                          fontFamily: FONT, fontSize: 9, color: COLORS.text3,
+                          background: 'transparent', border: `1px solid ${COLORS.border}`,
+                          padding: '3px 8px', borderRadius: 3, cursor: 'pointer',
+                        }}>SKIP LAYER</button>
+                        <button onClick={skipPallet} style={{
+                          fontFamily: FONT, fontSize: 9, color: COLORS.red,
+                          background: 'transparent', border: `1px solid ${COLORS.redDim}`,
+                          padding: '3px 8px', borderRadius: 3, cursor: 'pointer',
+                        }}>MISS PALLET</button>
+                      </>
+                    )}
+                    {receiptNum && (
+                      <span style={{ fontFamily: FONT, fontSize: 9, color: COLORS.text3 }}>QC: {receiptNum} ({grower})</span>
+                    )}
+                  </div>
+                )
+              })()}
+            </div>
+          </details>
+
+          {/* Main QC area — camera + inputs + details */}
+          <div style={{
+            display: 'grid', gridTemplateColumns: '1fr 1fr',
+            gap: 24, padding: '20px 32px',
+            alignContent: 'start',
+          }}>
+            {/* LEFT — Camera + sample input */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {/* Camera tuner — always visible */}
+              <CameraTuner
+                wsRef={wsRef}
+                graderConnected={graderConnected}
+                onUseCount={(count) => {
+                  setCounts(prev => ({ ...prev, _fullcountTotal: count, _source: 'grader' }))
+                  // Auto-select fullcount method when grader sends count
+                  if (sampleMethod !== 'fullcount') setSampleMethod('fullcount')
+                }}
+              />
+
+              {/* Incoming image from phone */}
+              {incomingImage ? (
+                <div style={{
+                  background: COLORS.bg2, border: `1px solid ${COLORS.border}`,
+                  borderRadius: 4, padding: 10,
+                }}>
+                  <div style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    marginBottom: 6,
+                  }}>
+                    <div style={{
+                      fontFamily: FONT, fontSize: 9, color: COLORS.text3,
+                      letterSpacing: '0.06em', textTransform: 'uppercase',
+                    }}>
+                      Capture <span style={{ color: COLORS.green, fontWeight: 400 }}>{incomingImage.timestamp}</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button onClick={() => {
+                        localStorage.removeItem('bc_zones')
+                        alert('Zones cleared. Draw new zones on the next captured image.')
+                      }} style={{
+                        fontFamily: FONT, fontSize: 9, color: COLORS.amber,
+                        background: 'transparent', border: `1px solid ${COLORS.amberDim}`,
+                        padding: '2px 8px', borderRadius: 2, cursor: 'pointer',
+                      }}>RESET ZONES</button>
+                      <button onClick={() => setShowZoneEditor(true)} style={{
+                        fontFamily: FONT, fontSize: 9, color: COLORS.amber,
+                        background: 'transparent', border: `1px solid ${COLORS.amberDim}`,
+                        padding: '2px 8px', borderRadius: 2, cursor: 'pointer',
+                      }}>
+                        {getSavedZones().length > 0 ? 'EDIT ZONES' : 'DRAW ZONES'}
+                      </button>
+                    </div>
+                  </div>
+                  <img
+                    src={incomingImage.data}
+                    onClick={() => setShowZoneEditor(true)}
+                    style={{
+                      width: '100%', maxHeight: 180, objectFit: 'contain',
+                      borderRadius: 3, border: `1px solid ${COLORS.border}`,
+                      cursor: 'pointer',
+                    }}
+                    alt="Captured tray"
+                  />
+                  {processing && (
+                    <div style={{
+                      fontFamily: FONT, fontSize: 10, color: COLORS.amber,
+                      textAlign: 'center', marginTop: 4,
+                    }}>COUNTING...</div>
+                  )}
+                </div>
+              ) : (
+                <div style={{
+                  display: 'flex', gap: 8,
+                }}>
+                  <button onClick={() => setShowPhoneQR(true)} style={{
+                    flex: 1, fontFamily: FONT, fontSize: 10, color: COLORS.text3,
+                    background: COLORS.bg2, border: `1px solid ${COLORS.border}`,
+                    padding: '12px', borderRadius: 4, cursor: 'pointer',
+                    letterSpacing: '0.06em', textAlign: 'center',
+                  }}>
+                    PHONE CAMERA
+                  </button>
+                  <button onClick={() => {
+                    // Retry the counting camera (grader)
+                    fetch('/api/restart-camera', { method: 'POST' }).catch(() => {})
+                  }} style={{
+                    flex: 1, fontFamily: FONT, fontSize: 10, color: COLORS.text3,
+                    background: COLORS.bg2, border: `1px solid ${COLORS.border}`,
+                    padding: '12px', borderRadius: 4, cursor: 'pointer',
+                    letterSpacing: '0.06em', textAlign: 'center',
+                  }}>
+                    COUNTING CAMERA
+                  </button>
+                </div>
+              )}
+
+              <ScaleCapture
+                scaleConnected={scaleConnected}
+                scaleWeight={scaleWeight}
+                capturedWeight={capturedWeight}
+                onWeightCapture={(weight, source) => {
+                  if (weight == null) {
+                    setCapturedWeight(null)
+                    setCounts(prev => ({ ...prev, _packWeight: 0, _scaleSource: null }))
+                  } else {
+                    setCapturedWeight({ weight, _source: source })
+                    setCounts(prev => ({ ...prev, _packWeight: weight, _scaleSource: source }))
+                  }
+                }}
+              />
+
+              <CountEntry
+                counts={counts} setCounts={setCounts}
+                detailed={detailedCounts}
+                onToggleDetailed={() => setDetailedCounts(!detailedCounts)}
+                sampleMethod={sampleMethod}
+                onToggleMethod={() => setSampleMethod(prev => prev === 'fullcount' ? '600g' : prev === '600g' ? 'manual' : 'fullcount')}
+                onSetMethod={setSampleMethod}
+                gradingStandard={gradingStandard}
+                onToggleStandard={() => setGradingStandard(prev => prev === 'mbg' ? 'butterfly' : 'mbg')}
+                onShowGradingGuide={() => setShowGradingGuide(true)}
+              />
+
+              {/* Action buttons */}
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => {
+                  setCounts({ good: 0, permanent: 0, condition: 0, decay: 0 })
+                  setCapturedWeight(null)
+                  setIncomingImage(null)
+                }} style={{
+                  flex: 1, background: COLORS.bg3,
+                  border: `1px solid ${COLORS.border2}`, color: COLORS.text3,
+                  fontFamily: FONT, fontSize: 11, fontWeight: 600,
+                  letterSpacing: '0.06em', textTransform: 'uppercase',
+                  padding: 14, borderRadius: 4, cursor: 'pointer',
+                }}>
+                  DISCARD
+                </button>
+                <button onClick={logSample} style={{
+                  flex: 2, background: COLORS.greenDim,
+                  border: `2px solid ${COLORS.green}`, color: COLORS.green,
+                  fontFamily: FONT, fontSize: 14, fontWeight: 700,
+                  letterSpacing: '0.08em', textTransform: 'uppercase',
+                  padding: 14, borderRadius: 4, cursor: 'pointer',
+                }}>
+                  {(() => {
+                    const oc = history.filter(s => s.lotId === lotId && !s.isExtra).length
+                    const ln = { 0: 'LOG BOTTOM', 1: 'LOG MIDDLE', 2: 'LOG TOP' }
+                    return oc < 3 && lotId ? ln[oc] : 'LOG SAMPLE'
+                  })()}
+                </button>
+                <button onClick={logExtraSample} style={{
+                  flex: 1, background: COLORS.bg3,
+                  border: `1px solid ${COLORS.purple}`, color: COLORS.purple,
+                  fontFamily: FONT, fontSize: 11, fontWeight: 600,
+                  letterSpacing: '0.06em', textTransform: 'uppercase',
+                  padding: 14, borderRadius: 4, cursor: 'pointer',
+                }}>
+                  EXTRA
+                </button>
+              </div>
+              {/* Static reminder */}
+              <div style={{
+                fontFamily: FONT, fontSize: 10, color: COLORS.text3,
+                textAlign: 'center', fontStyle: 'italic',
+              }}>
+                Discard sampled berries into trash lugs — do not return to production
+              </div>
+
+              {/* Inline line stats — appears after middle layer, persists until filled or pallet closed */}
+              {showLineStats && !palletLineStats && (
+                <div style={{
+                  background: COLORS.amberDim, border: `2px solid ${COLORS.amber}`,
+                  borderRadius: 6, padding: 14,
+                }}>
+                  <div style={{
+                    fontFamily: FONT, fontSize: 11, fontWeight: 700,
+                    color: COLORS.amber, marginBottom: 4,
+                    letterSpacing: '0.06em', textTransform: 'uppercase',
+                  }}>
+                    Line Stats — Check Machine Now
+                  </div>
+                  <div style={{
+                    fontFamily: FONT, fontSize: 10, color: COLORS.text2,
+                    marginBottom: 10,
+                  }}>
+                    Walk to the 360 and record current stats. You can defer this but it will keep showing until entered.
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 10 }}>
+                    <div>
+                      <div style={{ fontFamily: FONT, fontSize: 8, color: COLORS.amber, letterSpacing: '0.06em', marginBottom: 3 }}>LBS/HR</div>
+                      <input type="number" min="0" id="ls-rate" placeholder="0" style={{
+                        fontFamily: FONT, fontSize: 16, fontWeight: 700, textAlign: 'center',
+                        width: '100%', padding: '8px', borderRadius: 4, border: `1px solid ${COLORS.amber}`,
+                        background: COLORS.bg, color: COLORS.text, outline: 'none', boxSizing: 'border-box',
+                      }} />
+                    </div>
+                    <div>
+                      <div style={{ fontFamily: FONT, fontSize: 8, color: COLORS.amber, letterSpacing: '0.06em', marginBottom: 3 }}>BLOWOFF %</div>
+                      <input type="number" min="0" max="100" step="0.1" id="ls-blowoff" placeholder="0" style={{
+                        fontFamily: FONT, fontSize: 16, fontWeight: 700, textAlign: 'center',
+                        width: '100%', padding: '8px', borderRadius: 4, border: `1px solid ${COLORS.amber}`,
+                        background: COLORS.bg, color: COLORS.text, outline: 'none', boxSizing: 'border-box',
+                      }} />
+                    </div>
+                    <div>
+                      <div style={{ fontFamily: FONT, fontSize: 8, color: COLORS.amber, letterSpacing: '0.06em', marginBottom: 3 }}>SIZE SORT %</div>
+                      <input type="number" min="0" max="100" step="0.1" id="ls-size" placeholder="0" style={{
+                        fontFamily: FONT, fontSize: 16, fontWeight: 700, textAlign: 'center',
+                        width: '100%', padding: '8px', borderRadius: 4, border: `1px solid ${COLORS.amber}`,
+                        background: COLORS.bg, color: COLORS.text, outline: 'none', boxSizing: 'border-box',
+                      }} />
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button onClick={() => {
+                      const rate = parseFloat(document.getElementById('ls-rate')?.value) || null
+                      const blow = parseFloat(document.getElementById('ls-blowoff')?.value) || null
+                      const size = parseFloat(document.getElementById('ls-size')?.value) || null
+                      if (!rate && !blow && !size) return
+                      const stats = { lineRate: rate, blowoff: blow, sizeDiversion: size, capturedAt: showLineStats }
+                      setPalletLineStats(stats)
+                      // Attach to middle sample
+                      setHistory(prev => {
+                        const updated = [...prev]
+                        for (let i = updated.length - 1; i >= 0; i--) {
+                          if (updated[i].lotId === lotId && updated[i].sampleNum === 2 && !updated[i].isExtra) {
+                            updated[i] = { ...updated[i], lineStats: stats }
+                            break
+                          }
+                        }
+                        localStorage.setItem('bc_history', JSON.stringify(updated))
+                        serverSave('bc_history', updated)
+                        return updated
+                      })
+                      setShowLineStats(null)
+                    }} style={{
+                      flex: 2, fontFamily: FONT, fontSize: 12, fontWeight: 700,
+                      color: COLORS.amber, background: COLORS.bg,
+                      border: `2px solid ${COLORS.amber}`,
+                      padding: 10, borderRadius: 4, cursor: 'pointer',
+                      letterSpacing: '0.06em',
+                    }}>
+                      SAVE LINE STATS
+                    </button>
+                    <button onClick={() => {/* just leave it showing */}} style={{
+                      flex: 1, fontFamily: FONT, fontSize: 10,
+                      color: COLORS.text3, background: 'transparent',
+                      border: `1px solid ${COLORS.border}`,
+                      padding: 10, borderRadius: 4, cursor: 'pointer',
+                    }}>
+                      LATER
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Line stats confirmed — show as pallet metric */}
+              {palletLineStats && (
+                <div style={{
+                  background: COLORS.greenDim, border: `1px solid ${COLORS.green}`,
+                  borderRadius: 6, padding: '10px 14px',
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                }}>
+                  <div style={{ display: 'flex', gap: 14, fontFamily: FONT, fontSize: 11 }}>
+                    {palletLineStats.lineRate && <span><span style={{ color: COLORS.text3 }}>Lbs/Hr</span> <b style={{ color: COLORS.green }}>{palletLineStats.lineRate}</b></span>}
+                    {palletLineStats.blowoff != null && <span><span style={{ color: COLORS.text3 }}>Blowoff</span> <b style={{ color: COLORS.green }}>{palletLineStats.blowoff}%</b></span>}
+                    {palletLineStats.sizeDiversion != null && <span><span style={{ color: COLORS.text3 }}>Size Sort</span> <b style={{ color: COLORS.green }}>{palletLineStats.sizeDiversion}%</b></span>}
+                  </div>
+                  <span style={{ fontFamily: FONT, fontSize: 9, color: COLORS.green, fontStyle: 'italic' }}>
+                    {palletLineStats.capturedAt}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* RIGHT — Threshold detail + lot summary */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <ShareButton label="Share QC Data" getSnapshot={() => {
+                  const gradeResult = gradeSample(counts, GRADING_STANDARDS[gradingStandard].tolerances)
+                  const lotSamples = history.filter(s => s.lotId === lotId)
+                  const official = lotSamples.filter(s => !s.isExtra && !s.isSkipped)
+                  const packLog = JSON.parse(localStorage.getItem('bc_packlog') || '[]')
+                  const today = new Date().toLocaleDateString()
+                  const todayLog = packLog.filter(e => e.date === today)
+                  return {
+                    type: 'grade',
+                    lotId, dailyPalletNum, receiptNum, grower, variety, packCriteria,
+                    grade: gradeResult,
+                    views: {
+                      grade: { grade: gradeResult },
+                      lotSummary: {
+                        lotSummary: {
+                          lotId,
+                          sampleCount: official.length,
+                          grade: official.length > 0 ? gradeSample(averageCounts(official), GRADING_STANDARDS[gradingStandard].tolerances) : null,
+                          pctCombined: official.length > 0 ? gradeSample(averageCounts(official), GRADING_STANDARDS[gradingStandard].tolerances).pctCombined : 0,
+                          samples: [1,2,3].map(n => {
+                            const s = lotSamples.find(x => x.sampleNum === n)
+                            if (!s) return { layer: ['BTM','MID','TOP'][n-1], isSkipped: true }
+                            if (s.isSkipped) return { layer: ['BTM','MID','TOP'][n-1], isSkipped: true }
+                            return { layer: ['BTM','MID','TOP'][n-1], grade: gradeSample(s, GRADING_STANDARDS[gradingStandard].tolerances).label }
+                          }),
+                        },
+                      },
+                      packLog: {
+                        packLog: {
+                          entries: todayLog,
+                          totalBoxes: todayLog.reduce((s, e) => s + (e.boxes || 0), 0),
+                          palletCount: new Set(todayLog.filter(e => !e.isMissed).map(e => e.dailyPallet)).size,
+                        },
+                      },
+                    },
+                  }
+                }} />
+              </div>
+              <ThresholdBars counts={counts} tolerances={GRADING_STANDARDS[gradingStandard].tolerances} />
+              <LotSummary lotId={lotId} history={history} />
+            </div>
+          </div>
+
+          {/* Sample log — full width running dashboard */}
+          <div style={{ padding: '0 32px 20px' }}>
+            <SampleHistory history={history} onClear={clearHistory} />
+          </div>
+        </div>
+      ) : (
+        /* ========== OPS MODE ========== */
+        <div style={{
+          display: 'flex', flexDirection: 'column',
+          minHeight: 'calc(100vh - 90px)', overflowY: 'auto',
+        }}>
+          <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 24 }}>
+
+          {/* ── TODAY ── */}
+          <OpsSection title="Today">
+            <DayClose onDayReset={() => {
+              try { setHistory(JSON.parse(localStorage.getItem('bc_history') || '[]')) } catch {}
+            }} />
+            <ComplianceLog />
+          </OpsSection>
+
+          {/* ── QUALITY ── */}
+          <OpsSection title="Quality" actions={[
+            features.dcReconcile !== false && { label: 'DC RECON', onClick: () => setShowDCReconcile(true) },
+            features.packout !== false && { label: 'PACKOUT', onClick: () => setShowPackout(true) },
+            { label: 'ACCURACY', onClick: () => setShowAccuracy(true) },
+          ].filter(Boolean)}>
+            <SampleHistory history={history} onClear={clearHistory} />
+            <LotSummary lotId={lotId} history={history} />
+            {(features.speedQuality !== false || features.growerTrends !== false) && (
+              <GrowerFilter history={history}>
+                {(selectedGrower) => (
+                  <>
+                    {features.speedQuality !== false && <SpeedQuality history={history} growerFilter={selectedGrower} />}
+                    {features.growerTrends !== false && <GrowerTrends history={history} growerFilter={selectedGrower} />}
+                  </>
+                )}
+              </GrowerFilter>
+            )}
+          </OpsSection>
+
+          {/* ── RECORDS ── */}
+          <OpsSection title="Records" actions={[
+            { label: 'CHEMICALS', onClick: () => setShowChemicals(true) },
+            { label: 'CHEM LOG', onClick: () => setShowChemLog(true) },
+            features.logManager !== false && { label: 'LOGS', onClick: () => setShowLogManager(true) },
+          ].filter(Boolean)}>
+          </OpsSection>
+
+          {/* ── PACKING ── */}
+          <OpsSection title="Packing" actions={[
+            features.receipts !== false && { label: 'RECEIPTS', onClick: () => setShowReceipts(true) },
+            features.packLog !== false && { label: 'PACK LOG', onClick: () => setShowPackLog(true) },
+          ].filter(Boolean)}>
+            {features.lineMonitor !== false && <LineMonitor />}
+            {features.opsPanel !== false && (
+              <OpsPanel
+                berryScore={(() => { const r = gradeSample(counts, GRADING_STANDARDS[gradingStandard].tolerances); return r.score })()}
+                history={history}
+                lotId={lotId}
+              />
+            )}
+          </OpsSection>
+
+          </div>
+        </div>
+      )}
+
+      {/* Zone editor overlay */}
+      {showZoneEditor && incomingImage && (
+        <ZoneEditor
+          imageData={incomingImage.data}
+          onCounts={onZoneCounts}
+          onClose={() => setShowZoneEditor(false)}
+        />
+      )}
+
+      {/* Accuracy report overlay */}
+      {showAccuracy && (
+        <AccuracyReport onClose={() => setShowAccuracy(false)} />
+      )}
+
+      {/* Log manager overlay */}
+      {showLogManager && (
+        <LogManager
+          history={history}
+          onUpdateHistory={(h) => {
+            setHistory(h)
+            localStorage.setItem('bc_history', JSON.stringify(h))
+            serverSave('bc_history', h)
+          }}
+          onClose={() => setShowLogManager(false)}
+        />
+      )}
+
+      {/* Receipt manager overlay */}
+      {showReceipts && (
+        <ReceiptManager
+          onClose={() => setShowReceipts(false)}
+          onPrint={() => {
+            setShowReceipts(false)
+            setShowBarcodeSheet(true)
+          }}
+        />
+      )}
+
+      {/* Barcode sheet overlay */}
+      {showBarcodeSheet && (
+        <BarcodeSheet onClose={() => setShowBarcodeSheet(false)} />
+      )}
+
+      {/* Pack log overlay */}
+      {showPackLog && (
+        <PackLogViewer onClose={() => setShowPackLog(false)} />
+      )}
+
+      {/* Pack code manager overlay */}
+      {showPackCodes && (
+        <PackCodeManager onClose={() => setShowPackCodes(false)} />
+      )}
+
+      {/* Receipt change */}
+      {showReceiptChange && (
+        <ReceiptChange
+          currentReceipt={receiptNum}
+          currentGrower={grower}
+          onConfirm={handleReceiptChange}
+          onCancel={() => setShowReceiptChange(false)}
+        />
+      )}
+
+      {/* Pallet close-out */}
+      {showPalletCloseOut && (
+        <PalletCloseOut
+          lotId={lotId}
+          receiptNum={receiptNum}
+          grower={grower}
+          packCode={packCode}
+          priorReceipts={palletReceipts}
+          palletLineStats={palletLineStats}
+          onClose={(data) => {
+            handlePalletCloseOut(data)
+            setPalletReceipts([])
+          }}
+          onCancel={() => setShowPalletCloseOut(false)}
+        />
+      )}
+
+      {/* Backup form */}
+      {showBackupForm && (
+        <BackupForm onClose={() => setShowBackupForm(false)} />
+      )}
+
+      {/* Packout report overlay */}
+      {showPackout && (
+        <PackoutReport onClose={() => setShowPackout(false)} />
+      )}
+
+      {/* DC Reconciliation overlay */}
+      {showDCReconcile && (
+        <DCReconcile onClose={() => setShowDCReconcile(false)} />
+      )}
+
+      {/* Pre-pack notes */}
+      {showPrePack && (
+        <PrePackNotes onClose={() => setShowPrePack(false)} />
+      )}
+
+      {/* Feature toggle panel */}
+      {showFeatures && (
+        <FeaturePanel features={features} setFeatures={setFeatures} onClose={() => setShowFeatures(false)} />
+      )}
+
+      {/* Grading guide overlay */}
+      {showGradingGuide && (
+        <GradingGuide onClose={() => setShowGradingGuide(false)} />
+      )}
+
+      {showChemicals && (
+        <ChemicalInventory onClose={() => setShowChemicals(false)} />
+      )}
+
+      {showChemLog && (
+        <ChemicalLog onClose={() => setShowChemLog(false)} />
+      )}
+
+      {showPhoneQR && (
+        <PhoneQROverlay onClose={() => setShowPhoneQR(false)} />
+      )}
+
+      {pendingZoneCounts && (
+        <ZoneConfirm
+          image={pendingZoneCounts.image}
+          zones={pendingZoneCounts.zones}
+          counts={pendingZoneCounts.counts}
+          onConfirm={confirmZoneCounts}
+          onRedraw={() => { setPendingZoneCounts(null); setShowZoneEditor(true) }}
+          onCancel={() => setPendingZoneCounts(null)}
+        />
+      )}
+
+    </div>
+  )
+}
+
+function OpsSection({ title, actions, children }) {
+  const hasContent = React.Children.toArray(children).some(Boolean)
+  return (
+    <div>
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 10,
+        marginBottom: hasContent ? 12 : 0,
+        borderBottom: `1px solid ${COLORS.border}`, paddingBottom: 6,
+      }}>
+        <span style={{
+          fontFamily: FONT, fontSize: 10, fontWeight: 700, color: COLORS.text,
+          letterSpacing: '0.12em', textTransform: 'uppercase',
+        }}>{title}</span>
+        <div style={{ flex: 1 }} />
+        {actions && actions.map((a, i) => (
+          <button key={i} onClick={a.onClick} style={{
+            fontFamily: FONT, fontSize: 8, fontWeight: 600,
+            color: COLORS.text3, background: 'transparent',
+            border: `1px solid ${COLORS.border}`,
+            padding: '3px 8px', borderRadius: 2, cursor: 'pointer',
+            letterSpacing: '0.06em',
+          }}>{a.label}</button>
+        ))}
+      </div>
+      {hasContent && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {children}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function PhoneQROverlay({ onClose }) {
+  const canvasRef = React.useRef(null)
+  const [url, setUrl] = React.useState('')
+
+  React.useEffect(() => {
+    import('qrcode').then(QRCode => {
+      fetch('/api/ip').then(r => r.json()).then(d => {
+        const u = `http://${d.ip}:${d.port}/?mode=phone`
+        setUrl(u)
+        if (canvasRef.current) {
+          QRCode.toCanvas(canvasRef.current, u, { width: 220, margin: 2 })
+        }
+      }).catch(() => setUrl('Could not get IP'))
+    })
+  }, [])
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 9000,
+      background: 'rgba(0,0,0,0.5)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }} onClick={onClose}>
+      <div style={{
+        background: '#fff', borderRadius: 12, padding: 28,
+        textAlign: 'center', minWidth: 280,
+      }} onClick={e => e.stopPropagation()}>
+        <div style={{ fontFamily: FONT, fontSize: 14, fontWeight: 700, color: '#1a1a1a', marginBottom: 12 }}>
+          Scan to Open Phone Camera
+        </div>
+        <canvas ref={canvasRef} style={{ display: 'block', margin: '0 auto' }} />
+        {url && (
+          <div style={{ fontFamily: FONT, fontSize: 10, color: '#666', marginTop: 10, wordBreak: 'break-all' }}>
+            {url}
+          </div>
+        )}
+        <button onClick={onClose} style={{
+          fontFamily: FONT, fontSize: 11, color: '#999',
+          background: 'transparent', border: '1px solid #ddd',
+          padding: '8px 24px', borderRadius: 4, cursor: 'pointer',
+          marginTop: 16,
+        }}>CLOSE</button>
+      </div>
+    </div>
+  )
+}

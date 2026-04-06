@@ -1,0 +1,57 @@
+{
+  "name": "berrycheck",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "relay": "node server.js",
+    "build": "vite build",
+    "preview": "vite preview",
+    "electron:dev": "vite build && electron .",
+    "electron:build": "vite build && electron-builder --win portable"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^6.0.1",
+    "express": "^5.2.1",
+    "html5-qrcode": "^2.3.8",
+    "http-proxy-middleware": "^3.0.5",
+    "qrcode": "^1.5.4",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "vite": "^8.0.1",
+    "ws": "^8.19.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-basic-ssl": "^2.2.0",
+    "electron": "^35.7.5",
+    "electron-builder": "^26.8.1"
+  },
+  "build": {
+    "appId": "com.butterfly.berrycheck",
+    "productName": "BerryCheck",
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "server.js",
+      "camera_service.py",
+      "berry_hsv_values.json"
+    ],
+    "extraFiles": [
+      { "from": "dist", "to": "dist" },
+      { "from": "camera_service.py", "to": "camera_service.py" },
+      { "from": "berry_hsv_values.json", "to": "berry_hsv_values.json" }
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": "portable",
+      "icon": "public/icon.ico"
+    },
+    "portable": {
+      "artifactName": "BerryCheck.exe"
+    }
+  }
+}
