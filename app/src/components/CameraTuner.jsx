@@ -1,10 +1,37 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { COLORS, FONT } from '../constants'
 
+// Zone boundaries — fraction of frame dimensions (camera is fixed-mount)
+// Bottom rows are defect zones, rest is sample berries
+const ZONE_LINE_Y = 0.75       // berries below this Y fraction = defect zone
+const ZONE_LEFT_X = 0.33       // defect zone: left of this = scars
+const ZONE_RIGHT_X = 0.67      // defect zone: right of this = green/red
+
+function classifyBerries(berries, width, height) {
+  let sample = 0, scars = 0, condition = 0, greenRed = 0
+  const yLine = height * ZONE_LINE_Y
+  const xLeft = width * ZONE_LEFT_X
+  const xRight = width * ZONE_RIGHT_X
+
+  for (const b of berries) {
+    if (b.y < yLine) {
+      sample++
+    } else if (b.x < xLeft) {
+      scars++
+    } else if (b.x < xRight) {
+      condition++
+    } else {
+      greenRed++
+    }
+  }
+  return { total: berries.length, sample, zones: { scars, condition, greenRed } }
+}
+
 /**
  * CameraTuner — inline component for QC view.
  * Shows live camera feed with berry detection, HSV tuning sliders,
- * and a USE COUNT button that sends the berry count to CountEntry.
+ * a USE COUNT button that sends the berry count to CountEntry,
+ * and a LABEL mode for capturing YOLO training data.
  *
  * Props:
  *   wsRef           — ref to the relay WebSocket
@@ -34,6 +61,18 @@ export default function CameraTuner({ wsRef, graderConnected, onUseCount }) {
   const frameCountRef = useRef(0)
   const lastFpsTime = useRef(Date.now())
   const latestCountRef = useRef(0)
+  const latestBerriesRef = useRef([])
+  const frameDimsRef = useRef({ width: 1920, height: 1080 })
+
+  // Label mode state
+  const [labelMode, setLabelMode] = useState(false)
+  const [frozenRaw, setFrozenRaw] = useState(null)
+  const [markers, setMarkers] = useState([])
+  const [imgDims, setImgDims] = useState({ width: 1920, height: 1080 })
+  const [trainingCount, setTrainingCount] = useState(0)
+  const [saving, setSaving] = useState(false)
+  const [labelRadius, setLabelRadius] = useState(25)
+  const labelModeRef = useRef(false)
 
   const sendCommand = useCallback((cmd) => {
     if (wsRef?.current && wsRef.current.readyState === 1) {
@@ -59,11 +98,34 @@ export default function CameraTuner({ wsRef, graderConnected, onUseCount }) {
       return
     }
 
+    // Training capture response — enter label mode
+    if (msg.type === 'training_capture') {
+      setFrozenRaw(msg.raw)
+      setImgDims({ width: msg.width, height: msg.height })
+      // Pre-fill markers from detection (YOLO or HSV) as starting guess
+      const autoDetected = (msg.berries || []).map(b => ({ x: b.x, y: b.y, r: Math.max(b.r, 15) }))
+      if (autoDetected.length > 0) {
+        const radii = autoDetected.map(m => m.r).sort((a, b) => a - b)
+        setLabelRadius(Math.max(radii[Math.floor(radii.length / 2)], 20))
+      } else {
+        setLabelRadius(25)
+      }
+      setMarkers(autoDetected)
+      setLabelMode(true)
+      labelModeRef.current = true
+      return
+    }
+
     if (msg.type !== 'grader_frame') return
+
+    // Don't update canvas in label mode — frame is frozen
+    if (labelModeRef.current) return
 
     const count = msg.count || 0
     setBerryCount(count)
     latestCountRef.current = count
+    if (msg.berries) latestBerriesRef.current = msg.berries
+    if (msg.frame && canvasRef.current) frameDimsRef.current = { width: canvasRef.current.width || 1920, height: canvasRef.current.height || 1080 }
 
     if (msg.hsv) setHsv(prev => {
       const same = Object.keys(msg.hsv).every(k => prev[k] === msg.hsv[k])
@@ -127,6 +189,135 @@ export default function CameraTuner({ wsRef, graderConnected, onUseCount }) {
     return () => ws.removeEventListener('message', handler)
   }, [wsRef?.current, handleFrame])
 
+  // Fetch training count on mount and after saves
+  useEffect(() => {
+    fetch('/api/training-count').then(r => r.json()).then(d => {
+      if (d && typeof d.count === 'number') setTrainingCount(d.count)
+    }).catch(() => {})
+  }, [saving])
+
+  // Draw frozen frame + markers in label mode
+  useEffect(() => {
+    if (!labelMode || !frozenRaw || !canvasRef.current) return
+    const canvas = canvasRef.current
+    const ctx = canvas.getContext('2d')
+    const img = new Image()
+    img.onload = () => {
+      canvas.width = img.width
+      canvas.height = img.height
+      ctx.drawImage(img, 0, 0)
+      markers.forEach((m, i) => {
+        // Filled semi-transparent circle
+        ctx.beginPath()
+        ctx.arc(m.x, m.y, m.r, 0, 2 * Math.PI)
+        ctx.fillStyle = 'rgba(0, 255, 0, 0.25)'
+        ctx.fill()
+        ctx.strokeStyle = '#00ff00'
+        ctx.lineWidth = 3
+        ctx.stroke()
+        // Number label with background
+        const label = String(i + 1)
+        ctx.font = 'bold 18px monospace'
+        const tw = ctx.measureText(label).width
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.6)'
+        ctx.fillRect(m.x - tw / 2 - 3, m.y - m.r - 24, tw + 6, 22)
+        ctx.fillStyle = '#00ff00'
+        ctx.fillText(label, m.x - tw / 2, m.y - m.r - 6)
+      })
+    }
+    img.src = 'data:image/jpeg;base64,' + frozenRaw
+  }, [labelMode, frozenRaw, markers])
+
+  // Map click position to image coordinates, accounting for objectFit: contain letterboxing
+  const clickToImageCoords = useCallback((e) => {
+    const canvas = canvasRef.current
+    if (!canvas) return null
+    const rect = canvas.getBoundingClientRect()
+    const canvasAspect = canvas.width / canvas.height
+    const elemAspect = rect.width / rect.height
+    let renderW, renderH, offsetX, offsetY
+    if (canvasAspect > elemAspect) {
+      // Wider than element — letterbox top/bottom
+      renderW = rect.width
+      renderH = rect.width / canvasAspect
+      offsetX = 0
+      offsetY = (rect.height - renderH) / 2
+    } else {
+      // Taller than element — letterbox left/right
+      renderH = rect.height
+      renderW = rect.height * canvasAspect
+      offsetX = (rect.width - renderW) / 2
+      offsetY = 0
+    }
+    const x = Math.round((e.clientX - rect.left - offsetX) * (canvas.width / renderW))
+    const y = Math.round((e.clientY - rect.top - offsetY) * (canvas.height / renderH))
+    // Ignore clicks in the letterbox padding
+    if (x < 0 || x >= canvas.width || y < 0 || y >= canvas.height) return null
+    return { x, y }
+  }, [])
+
+  // Canvas click — add/remove markers in label mode
+  const handleCanvasClick = useCallback((e) => {
+    if (!labelModeRef.current) return
+    const coords = clickToImageCoords(e)
+    if (!coords) return
+    const { x: imgX, y: imgY } = coords
+
+    setMarkers(prev => {
+      const hitIdx = prev.findIndex(m => {
+        const dist = Math.sqrt((m.x - imgX) ** 2 + (m.y - imgY) ** 2)
+        return dist < m.r * 1.5
+      })
+      if (hitIdx >= 0) {
+        return prev.filter((_, i) => i !== hitIdx)
+      } else {
+        return [...prev, { x: imgX, y: imgY, r: labelRadius }]
+      }
+    })
+  }, [labelRadius])
+
+  // Scroll wheel adjusts label radius
+  const handleCanvasWheel = useCallback((e) => {
+    if (!labelModeRef.current) return
+    e.preventDefault()
+    const delta = e.deltaY > 0 ? -3 : 3
+    setLabelRadius(prev => Math.max(8, Math.min(60, prev + delta)))
+  }, [])
+
+  const saveTrainingData = useCallback(async () => {
+    setSaving(true)
+    try {
+      const res = await fetch('/api/training-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image: frozenRaw,
+          labels: markers,
+          width: imgDims.width,
+          height: imgDims.height,
+        }),
+      })
+      const data = await res.json()
+      if (data.count) setTrainingCount(data.count)
+      const classified = classifyBerries(markers, imgDims.width, imgDims.height)
+      onUseCount(classified)
+      setLabelMode(false)
+      labelModeRef.current = false
+      setMarkers([])
+      setFrozenRaw(null)
+    } catch (e) {
+      console.error('Save failed:', e)
+    }
+    setSaving(false)
+  }, [frozenRaw, markers, imgDims])
+
+  const cancelLabel = useCallback(() => {
+    setLabelMode(false)
+    labelModeRef.current = false
+    setMarkers([])
+    setFrozenRaw(null)
+  }, [])
+
   const [retrying, setRetrying] = useState(false)
   const retryCamera = useCallback(() => {
     setRetrying(true)
@@ -179,17 +370,18 @@ export default function CameraTuner({ wsRef, graderConnected, onUseCount }) {
       <div style={{
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         padding: '6px 10px', borderBottom: `1px solid ${COLORS.border}`,
-        background: COLORS.bg3,
+        background: labelMode ? '#1a2f1a' : COLORS.bg3,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <div style={{
-            width: 6, height: 6, borderRadius: '50%', background: COLORS.green,
-            boxShadow: `0 0 6px ${COLORS.green}`,
+            width: 6, height: 6, borderRadius: '50%',
+            background: labelMode ? COLORS.amber : COLORS.green,
+            boxShadow: `0 0 6px ${labelMode ? COLORS.amber : COLORS.green}`,
           }} />
-          <span style={{ fontFamily: FONT, fontSize: 10, color: COLORS.green, letterSpacing: '0.06em', fontWeight: 600 }}>
-            CAMERA
+          <span style={{ fontFamily: FONT, fontSize: 10, color: labelMode ? COLORS.amber : COLORS.green, letterSpacing: '0.06em', fontWeight: 600 }}>
+            {labelMode ? 'LABEL MODE' : 'CAMERA'}
           </span>
-          {Object.keys(profiles).length > 0 && Object.entries(profiles).map(([key, label]) => (
+          {!labelMode && Object.keys(profiles).length > 0 && Object.entries(profiles).map(([key, label]) => (
             <button key={key} onClick={() => {
               setProfile(key)
               sendCommand({ action: 'set_profile', name: key })
@@ -204,15 +396,23 @@ export default function CameraTuner({ wsRef, graderConnected, onUseCount }) {
               {label}
             </button>
           ))}
-          <span style={{ fontFamily: FONT, fontSize: 9, color: COLORS.text3 }}>
-            {fps} fps
-          </span>
+          {!labelMode && (
+            <span style={{ fontFamily: FONT, fontSize: 9, color: COLORS.text3 }}>
+              {fps} fps
+            </span>
+          )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {trainingCount > 0 && (
+            <span style={{ fontFamily: FONT, fontSize: 9, color: COLORS.text3 }}>
+              {trainingCount} labeled
+            </span>
+          )}
           <span style={{
-            fontFamily: FONT, fontSize: 14, fontWeight: 700, color: COLORS.green,
+            fontFamily: FONT, fontSize: 14, fontWeight: 700,
+            color: labelMode ? COLORS.amber : COLORS.green,
           }}>
-            {berryCount}
+            {labelMode ? markers.length : berryCount}
           </span>
           <span style={{ fontFamily: FONT, fontSize: 9, color: COLORS.text3 }}>berries</span>
         </div>
@@ -220,67 +420,124 @@ export default function CameraTuner({ wsRef, graderConnected, onUseCount }) {
 
       {/* Camera feed */}
       <div style={{ position: 'relative', background: '#000' }}>
-        <canvas ref={canvasRef} style={{
-          width: '100%', maxHeight: (showMask || showFiltered) ? 140 : 200, objectFit: 'contain', display: 'block',
+        <canvas ref={canvasRef} onClick={handleCanvasClick} onWheel={handleCanvasWheel} style={{
+          width: '100%', maxHeight: labelMode ? 300 : ((showMask || showFiltered) ? 140 : 200),
+          objectFit: 'contain', display: 'block',
+          cursor: labelMode ? 'crosshair' : 'default',
         }} />
-        {showMask && (
+        {!labelMode && showMask && (
           <canvas ref={maskCanvasRef} style={{
             width: '100%', maxHeight: 100, objectFit: 'contain', display: 'block',
             borderTop: '1px solid #333',
           }} />
         )}
-        {showFiltered && (
+        {!labelMode && showFiltered && (
           <canvas ref={filteredCanvasRef} style={{
             width: '100%', maxHeight: 100, objectFit: 'contain', display: 'block',
             borderTop: '1px solid #333',
           }} />
         )}
+        {labelMode && (
+          <>
+            <div style={{
+              position: 'absolute', bottom: 6, left: 6,
+              fontFamily: FONT, fontSize: 9, color: COLORS.text3,
+              background: 'rgba(0,0,0,0.7)', padding: '3px 6px', borderRadius: 3,
+            }}>
+              Click to add — click circle to remove — scroll to resize
+            </div>
+            <div style={{
+              position: 'absolute', bottom: 6, right: 6,
+              fontFamily: FONT, fontSize: 10, color: COLORS.amber, fontWeight: 700,
+              background: 'rgba(0,0,0,0.7)', padding: '3px 8px', borderRadius: 3,
+            }}>
+              r={labelRadius}
+            </div>
+          </>
+        )}
       </div>
 
-      {/* USE COUNT button */}
+      {/* Action buttons */}
       <div style={{ padding: '6px 10px', display: 'flex', gap: 6 }}>
-        <button onClick={() => onUseCount(latestCountRef.current)} style={{
-          flex: 1, fontFamily: FONT, fontSize: 12, fontWeight: 700,
-          color: '#fff', background: COLORS.green,
-          border: 'none', padding: '10px', borderRadius: 4, cursor: 'pointer',
-          letterSpacing: '0.06em',
-        }}>
-          USE COUNT ({berryCount})
-        </button>
-        <button onClick={() => setShowTuning(!showTuning)} style={{
-          fontFamily: FONT, fontSize: 9, fontWeight: 600,
-          color: showTuning ? COLORS.green : COLORS.text3,
-          background: showTuning ? COLORS.greenDim : 'transparent',
-          border: `1px solid ${showTuning ? COLORS.green : COLORS.border}`,
-          padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
-          letterSpacing: '0.06em',
-        }}>
-          TUNE
-        </button>
-        <button onClick={() => setShowMask(!showMask)} style={{
-          fontFamily: FONT, fontSize: 9, fontWeight: 600,
-          color: showMask ? COLORS.amber : COLORS.text3,
-          background: 'transparent',
-          border: `1px solid ${showMask ? COLORS.amber : COLORS.border}`,
-          padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
-          letterSpacing: '0.06em',
-        }}>
-          MASK
-        </button>
-        <button onClick={() => setShowFiltered(!showFiltered)} style={{
-          fontFamily: FONT, fontSize: 9, fontWeight: 600,
-          color: showFiltered ? '#2563EB' : COLORS.text3,
-          background: 'transparent',
-          border: `1px solid ${showFiltered ? '#2563EB' : COLORS.border}`,
-          padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
-          letterSpacing: '0.06em',
-        }}>
-          FILTERED
-        </button>
+        {labelMode ? (
+          <>
+            <button onClick={saveTrainingData} disabled={saving} style={{
+              flex: 1, fontFamily: FONT, fontSize: 12, fontWeight: 700,
+              color: '#fff', background: saving ? COLORS.text3 : COLORS.green,
+              border: 'none', padding: '10px', borderRadius: 4,
+              cursor: saving ? 'default' : 'pointer', letterSpacing: '0.06em',
+            }}>
+              {saving ? 'SAVING...' : `SAVE (${markers.length} berries)`}
+            </button>
+            <button onClick={cancelLabel} style={{
+              fontFamily: FONT, fontSize: 9, fontWeight: 600,
+              color: COLORS.amber, background: 'transparent',
+              border: `1px solid ${COLORS.amber}`,
+              padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
+              letterSpacing: '0.06em',
+            }}>
+              CANCEL
+            </button>
+          </>
+        ) : (
+          <>
+            <button onClick={() => {
+              const dims = frameDimsRef.current
+              const classified = classifyBerries(latestBerriesRef.current, dims.width, dims.height)
+              onUseCount(classified)
+            }} style={{
+              flex: 1, fontFamily: FONT, fontSize: 12, fontWeight: 700,
+              color: '#fff', background: COLORS.green,
+              border: 'none', padding: '10px', borderRadius: 4, cursor: 'pointer',
+              letterSpacing: '0.06em',
+            }}>
+              USE COUNT ({berryCount})
+            </button>
+            <button onClick={() => sendCommand({ action: 'capture_training' })} style={{
+              fontFamily: FONT, fontSize: 9, fontWeight: 600,
+              color: COLORS.amber, background: 'transparent',
+              border: `1px solid ${COLORS.amber}`,
+              padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
+              letterSpacing: '0.06em',
+            }}>
+              LABEL
+            </button>
+            <button onClick={() => setShowTuning(!showTuning)} style={{
+              fontFamily: FONT, fontSize: 9, fontWeight: 600,
+              color: showTuning ? COLORS.green : COLORS.text3,
+              background: showTuning ? COLORS.greenDim : 'transparent',
+              border: `1px solid ${showTuning ? COLORS.green : COLORS.border}`,
+              padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
+              letterSpacing: '0.06em',
+            }}>
+              TUNE
+            </button>
+            <button onClick={() => setShowMask(!showMask)} style={{
+              fontFamily: FONT, fontSize: 9, fontWeight: 600,
+              color: showMask ? COLORS.amber : COLORS.text3,
+              background: 'transparent',
+              border: `1px solid ${showMask ? COLORS.amber : COLORS.border}`,
+              padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
+              letterSpacing: '0.06em',
+            }}>
+              MASK
+            </button>
+            <button onClick={() => setShowFiltered(!showFiltered)} style={{
+              fontFamily: FONT, fontSize: 9, fontWeight: 600,
+              color: showFiltered ? '#2563EB' : COLORS.text3,
+              background: 'transparent',
+              border: `1px solid ${showFiltered ? '#2563EB' : COLORS.border}`,
+              padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
+              letterSpacing: '0.06em',
+            }}>
+              FILTERED
+            </button>
+          </>
+        )}
       </div>
 
-      {/* Tuning panel — collapsible */}
-      {showTuning && (
+      {/* Tuning panel — collapsible (hidden in label mode) */}
+      {showTuning && !labelMode && (
         <div style={{
           padding: '8px 10px', borderTop: `1px solid ${COLORS.border}`,
           background: COLORS.bg3,

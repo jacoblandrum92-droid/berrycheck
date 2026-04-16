@@ -62,6 +62,21 @@ const METHODS = {
       'System calculates estimated total berry count from the 30-berry subsample weight.',
     ],
   },
+  pint: {
+    label: 'PINT CLAMSHELL',
+    brief: 'Weigh a pint clamshell, camera counts, system scales to 600g equivalent.',
+    verbose: 'Quick sampling method using a sealed pint clamshell from the line. Weigh the clamshell on the scale (tare for container weight), dump onto the roller tray, and let the camera count. Enter defects as found. The grade is calculated on actual percentages — same result as a 600g sample. The 600g equivalent projection is shown for MBG reporting compatibility.',
+    color: '#10B981',
+    steps: [
+      'Pull a sealed pint clamshell from the packing line.',
+      'Place on the clamshell scale. Record net berry weight (after tare).',
+      'Dump contents onto the roller tray.',
+      'Camera counts total berries — verify and correct if needed.',
+      'Inspect every berry. Remove and sort all defects.',
+      'Record defect counts below.',
+      'System grades on actual percentages and shows 600g equivalent for reporting.',
+    ],
+  },
 }
 
 const DETAIL_MODES = {
@@ -183,16 +198,31 @@ export default function CountEntry({ counts, setCounts, detailed, onToggleDetail
     try { return localStorage.getItem('bc_qc_simple_view') === 'true' } catch { return false }
   })
 
+  // Reset local fields when counts are cleared (after logging a sample)
+  useEffect(() => {
+    if (counts.good === 0 && counts.permanent === 0 && counts.condition === 0 && counts.decay === 0 && !counts._fullcountTotal) {
+      setFullcountTotal('')
+      setPackWeight('')
+      setPintWeight('')
+      setManualTotal('')
+      setThirtyBerryWeight('')
+    }
+  }, [counts.good, counts.permanent, counts.condition, counts.decay])
+
   // Auto-detect sample method from incoming data
   useEffect(() => {
     if ((counts._source === 'grader' || counts._source === 'phone') && counts._fullcountTotal) {
       setFullcountTotal(String(counts._fullcountTotal))
-      if (sampleMethod !== 'fullcount' && onSetMethod) onSetMethod('fullcount')
+      if (sampleMethod !== 'fullcount' && sampleMethod !== 'pint' && onSetMethod) onSetMethod('fullcount')
     }
   }, [counts._fullcountTotal, counts._source])
 
+  const [pintWeight, setPintWeight] = useState('')
+  const [pintTare, setPintTare] = useState(true) // subtract 20g clamshell weight
+
   const isManual = sampleMethod === 'manual'
   const isFullCount = sampleMethod === 'fullcount'
+  const isPint = sampleMethod === 'pint'
 
   const toggleInfo = (key) => setExpandedInfo(prev => prev === key ? null : key)
 
@@ -211,8 +241,15 @@ export default function CountEntry({ counts, setCounts, detailed, onToggleDetail
     : berrySize === 'Medium' ? COLORS.text
     : COLORS.text3
 
+  // === Pint mode calculations ===
+  const CLAMSHELL_TARE = 20 // grams — typical pint clamshell weight
+  const pintGross = parseFloat(pintWeight) || 0
+  const pintNetWeight = pintTare ? Math.max(0, pintGross - CLAMSHELL_TARE) : pintGross
+  const pintScaleFactor = pintNetWeight > 0 ? 600 / pintNetWeight : 0
+  const pint600gEquivTotal = pintScaleFactor > 0 && parseInt(fullcountTotal) ? Math.round(parseInt(fullcountTotal) * pintScaleFactor) : null
+
   // === Active total — depends on mode ===
-  const estimatedTotal = isFullCount ? (parseInt(fullcountTotal) || null)
+  const estimatedTotal = (isFullCount || isPint) ? (parseInt(fullcountTotal) || null)
     : isManual ? (parseInt(manualTotal) || null) : estimatedTotal600
 
   // Calculate total defects
@@ -236,22 +273,29 @@ export default function CountEntry({ counts, setCounts, detailed, onToggleDetail
       const w = parseFloat(packWeight) || 0
       setCounts(prev => {
         if (prev._sampleMethod === 'fullcount' && prev._fullcountTotal === t && prev._packWeight === w) return prev
-        return { ...prev, _sampleMethod: 'fullcount', _fullcountTotal: t, _packWeight: w, _manualTotal: 0, _thirtyBerryWeight: 0 }
+        return { ...prev, _sampleMethod: 'fullcount', _fullcountTotal: t, _packWeight: w, _manualTotal: 0, _thirtyBerryWeight: 0, _pintWeight: 0 }
+      })
+    } else if (isPint) {
+      const t = parseInt(fullcountTotal) || 0
+      const pw = parseFloat(pintWeight) || 0
+      setCounts(prev => {
+        if (prev._sampleMethod === 'pint' && prev._fullcountTotal === t && prev._pintWeight === pw) return prev
+        return { ...prev, _sampleMethod: 'pint', _fullcountTotal: t, _pintWeight: pw, _pintScaleFactor: pintScaleFactor, _pint600gEquivTotal: pint600gEquivTotal, _manualTotal: 0, _thirtyBerryWeight: 0, _packWeight: 0 }
       })
     } else if (isManual) {
       const t = parseInt(manualTotal) || 0
       setCounts(prev => {
         if (prev._sampleMethod === 'manual' && prev._manualTotal === t) return prev
-        return { ...prev, _sampleMethod: 'manual', _manualTotal: t, _thirtyBerryWeight: 0, _fullcountTotal: 0, _packWeight: 0 }
+        return { ...prev, _sampleMethod: 'manual', _manualTotal: t, _thirtyBerryWeight: 0, _fullcountTotal: 0, _packWeight: 0, _pintWeight: 0 }
       })
     } else {
       const w = parseFloat(thirtyBerryWeight) || 0
       setCounts(prev => {
         if (prev._sampleMethod === '600g' && prev._thirtyBerryWeight === w) return prev
-        return { ...prev, _sampleMethod: '600g', _thirtyBerryWeight: w, _manualTotal: 0, _fullcountTotal: 0, _packWeight: 0 }
+        return { ...prev, _sampleMethod: '600g', _thirtyBerryWeight: w, _manualTotal: 0, _fullcountTotal: 0, _packWeight: 0, _pintWeight: 0 }
       })
     }
-  }, [thirtyBerryWeight, manualTotal, fullcountTotal, packWeight, isManual, isFullCount])
+  }, [thirtyBerryWeight, manualTotal, fullcountTotal, packWeight, pintWeight, isManual, isFullCount, isPint])
 
   // Auto-calculate good when total or defects change
   useEffect(() => {
@@ -268,7 +312,7 @@ export default function CountEntry({ counts, setCounts, detailed, onToggleDetail
         return { ...prev, good: newGood }
       })
     }
-  }, [isFullCount ? fullcountTotal : isManual ? manualTotal : thirtyBerryWeight, estimatedTotal])
+  }, [(isFullCount || isPint) ? fullcountTotal : isManual ? manualTotal : thirtyBerryWeight, estimatedTotal])
 
   const update = (key, val) => {
     const newVal = Math.max(0, parseInt(val) || 0)
@@ -442,49 +486,109 @@ export default function CountEntry({ counts, setCounts, detailed, onToggleDetail
       {!simpleView && <SOPSteps steps={methodConfig.steps} />}
 
       {/* === SAMPLE SIZE INPUT — mode-dependent === */}
-      {isFullCount ? (
+      {(isFullCount || isPint) ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
-          {/* Pack weight — calibration check, not used for grading */}
-          <div style={{
-            background: COLORS.bg2, border: `1px solid ${COLORS.border}`,
-            borderRadius: 4, padding: '10px 12px',
-          }}>
+          {/* Pint: clamshell weight — used for 600g equivalent scaling */}
+          {isPint ? (
             <div style={{
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              marginBottom: 6,
+              background: COLORS.bg2, border: `1px solid #10B98140`,
+              borderRadius: 4, padding: '10px 12px',
             }}>
               <div style={{
-                fontFamily: FONT, fontSize: 9, color: COLORS.text3,
-                textTransform: 'uppercase', letterSpacing: '0.06em',
-              }}>Pack Weight (g) — calibration check</div>
-              {packWeight && (
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                marginBottom: 6,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{
+                    fontFamily: FONT, fontSize: 9, color: '#10B981',
+                    textTransform: 'uppercase', letterSpacing: '0.06em',
+                  }}>{pintTare ? 'Gross Weight (g)' : 'Net Berry Weight (g)'}</div>
+                  <button onClick={() => setPintTare(prev => !prev)} style={{
+                    fontFamily: FONT, fontSize: 8, fontWeight: 600,
+                    color: pintTare ? '#10B981' : COLORS.text3,
+                    background: pintTare ? '#10B98115' : 'transparent',
+                    border: `1px solid ${pintTare ? '#10B981' : COLORS.border}`,
+                    padding: '1px 6px', borderRadius: 3, cursor: 'pointer',
+                    letterSpacing: '0.04em',
+                  }}>
+                    TARE −{CLAMSHELL_TARE}g {pintTare ? 'ON' : 'OFF'}
+                  </button>
+                </div>
+                {pintNetWeight > 0 && (
+                  <div style={{
+                    fontFamily: FONT, fontSize: 9, color: COLORS.text3,
+                    letterSpacing: '0.04em',
+                  }}>
+                    {pintTare && pintGross > 0 ? `${pintGross}g − ${CLAMSHELL_TARE}g = ${pintNetWeight}g` : `${pintNetWeight}g`}
+                    {` · ${(pintNetWeight / 28.35).toFixed(1)} oz`}
+                    {pintScaleFactor > 0 && ` · ${pintScaleFactor.toFixed(2)}x → 600g`}
+                  </div>
+                )}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
+                <input type="number" min="0" step="0.1"
+                  value={pintWeight}
+                  onChange={e => setPintWeight(e.target.value)}
+                  placeholder="0"
+                  style={{
+                    background: 'transparent', border: 'none', padding: 0,
+                    fontFamily: FONT, fontSize: 18, fontWeight: 600,
+                    color: pintWeight ? COLORS.text : COLORS.text3,
+                    width: '80px', outline: 'none',
+                  }}
+                />
+                {pint600gEquivTotal && (
+                  <div style={{
+                    fontFamily: FONT, fontSize: 11, color: '#10B981', fontWeight: 600,
+                  }}>
+                    600g equiv: ~{pint600gEquivTotal} berries
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            /* Fullcount: pack weight — calibration check */
+            <div style={{
+              background: COLORS.bg2, border: `1px solid ${COLORS.border}`,
+              borderRadius: 4, padding: '10px 12px',
+            }}>
+              <div style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                marginBottom: 6,
+              }}>
                 <div style={{
                   fontFamily: FONT, fontSize: 9, color: COLORS.text3,
-                  letterSpacing: '0.04em',
-                }}>
-                  {(parseFloat(packWeight) / 28.35).toFixed(1)} oz
-                </div>
-              )}
+                  textTransform: 'uppercase', letterSpacing: '0.06em',
+                }}>Pack Weight (g) — calibration check</div>
+                {packWeight && (
+                  <div style={{
+                    fontFamily: FONT, fontSize: 9, color: COLORS.text3,
+                    letterSpacing: '0.04em',
+                  }}>
+                    {(parseFloat(packWeight) / 28.35).toFixed(1)} oz
+                  </div>
+                )}
+              </div>
+              <input type="number" min="0" step="0.1"
+                value={packWeight}
+                onChange={e => setPackWeight(e.target.value)}
+                placeholder="0"
+                style={{
+                  background: 'transparent', border: 'none', padding: 0,
+                  fontFamily: FONT, fontSize: 18, fontWeight: 600,
+                  color: packWeight ? COLORS.text : COLORS.text3,
+                  width: '100%', outline: 'none',
+                }}
+              />
             </div>
-            <input type="number" min="0" step="0.1"
-              value={packWeight}
-              onChange={e => setPackWeight(e.target.value)}
-              placeholder="0"
-              style={{
-                background: 'transparent', border: 'none', padding: 0,
-                fontFamily: FONT, fontSize: 18, fontWeight: 600,
-                color: packWeight ? COLORS.text : COLORS.text3,
-                width: '100%', outline: 'none',
-              }}
-            />
-          </div>
+          )}
           {/* Total berries — from camera */}
           <div style={{
-            background: COLORS.bg2, border: `1px solid #2563EB40`,
+            background: COLORS.bg2, border: `1px solid ${isPint ? '#10B98140' : '#2563EB40'}`,
             borderRadius: 4, padding: '10px 12px',
           }}>
             <div style={{
-              fontFamily: FONT, fontSize: 9, color: '#2563EB',
+              fontFamily: FONT, fontSize: 9, color: isPint ? '#10B981' : '#2563EB',
               textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6,
             }}>Total Berries — camera count</div>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
@@ -501,7 +605,7 @@ export default function CountEntry({ counts, setCounts, detailed, onToggleDetail
               />
               {estimatedTotal && (
                 <div style={{
-                  fontFamily: FONT, fontSize: 11, color: '#2563EB', fontWeight: 600,
+                  fontFamily: FONT, fontSize: 11, color: isPint ? '#10B981' : '#2563EB', fontWeight: 600,
                 }}>
                   every berry inspected
                 </div>
@@ -616,7 +720,7 @@ export default function CountEntry({ counts, setCounts, detailed, onToggleDetail
               <div>{estimatedTotal} total</div>
             </>
           ) : (
-            <div>{isFullCount ? 'Snap photo for count' : isManual ? 'Enter total berry count' : 'Enter 30-berry weight'}</div>
+            <div>{(isFullCount || isPint) ? 'Snap photo for count' : isManual ? 'Enter total berry count' : 'Enter 30-berry weight'}</div>
           )}
         </div>
       </div>

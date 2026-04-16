@@ -9,4 +9,8 @@ package-lock.json
 __pycache__/
 *.pyc
 app/data/
+app/ml/dataset/
+app/ml/dataset_backup*/
+app/ml/runs/
+app/ml/*.pt
 machine/buffer/

@@ -17,7 +17,6 @@ const labelStyle = {
 }
 
 export default function PalletBuilder({
-  dailyPalletNum, palletTag, setPalletTag,
   palletReceipts, onAddReceipt, onUpdateBoxes, onRemoveReceipt, onSelectReceipt,
   packCode, setPackCode,
   currentReceiptNum,
@@ -69,26 +68,6 @@ export default function PalletBuilder({
       <div style={{
         display: 'flex', alignItems: 'flex-end', gap: 12, marginBottom: palletReceipts.length > 0 ? 10 : 0,
       }}>
-        {/* Daily pallet # */}
-        <div style={{ textAlign: 'center', minWidth: 50 }}>
-          <label style={labelStyle}>Pallet</label>
-          <div style={{
-            fontFamily: FONT, fontSize: 22, fontWeight: 800,
-            color: COLORS.green, lineHeight: 1,
-          }}>
-            #{dailyPalletNum}
-          </div>
-        </div>
-
-        {/* Pallet tag */}
-        <div style={{ minWidth: 110 }}>
-          <label style={labelStyle}>Pallet Tag</label>
-          <input style={inputStyle}
-            value={palletTag} onChange={e => setPalletTag(e.target.value)}
-            placeholder="from portal"
-          />
-        </div>
-
         {/* Pack code */}
         <div style={{ minWidth: 160, position: 'relative' }}>
           <label style={labelStyle}>Pack Code</label>

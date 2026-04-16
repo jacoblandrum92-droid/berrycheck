@@ -1,120 +1,160 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { COLORS, FONT, gradeSample } from '../constants'
 
 const GRADE_BG = {
-  excellent: '#E1F5EE', ok: '#E1F5EE',
-  warn: '#FAEEDA', fail: '#FCEBEB', none: '#f7f7f5',
+  excellent: '#0F6E5615', ok: '#0F6E5615',
+  warn: '#BA751715', fail: '#A32D2D15', none: COLORS.bg3,
 }
 const GRADE_TEXT = {
   excellent: '#0F6E56', ok: '#0F6E56',
   warn: '#BA7517', fail: '#A32D2D', none: '#999',
 }
+const GRADE_BORDER = {
+  excellent: '#0F6E5640', ok: '#0F6E5640',
+  warn: '#BA751740', fail: '#A32D2D40', none: COLORS.border,
+}
 
 export default function SampleHistory({ history, onClear }) {
-  const thStyle = {
-    fontFamily: FONT, fontSize: 9, color: COLORS.text3,
-    textTransform: 'uppercase', letterSpacing: '0.08em',
-    textAlign: 'left', padding: '7px 12px',
-    borderBottom: `1px solid ${COLORS.border}`, fontWeight: 500,
-  }
-  const tdStyle = {
-    fontFamily: FONT, fontSize: 11, color: COLORS.text2, padding: '9px 12px',
-  }
+  const [expanded, setExpanded] = useState(false)
+  const recent = [...history].reverse()
+  const shown = expanded ? recent : recent.slice(0, 5)
+  const todaySamples = history.filter(s => s.date === new Date().toLocaleDateString() && !s.isSkipped)
+  const todayGrades = todaySamples.map(s => gradeSample(s))
+  const avgScore = todayGrades.length > 0
+    ? Math.round(todayGrades.reduce((sum, g) => sum + (g.score || 0), 0) / todayGrades.length)
+    : null
 
   return (
     <div style={{
-      background: COLORS.bg2, border: `1px solid ${COLORS.border}`,
-      borderRadius: 4, overflow: 'hidden',
+      background: COLORS.bg, border: `1px solid ${COLORS.border}`,
+      borderRadius: 8, overflow: 'hidden',
     }}>
+      {/* Header card */}
       <div style={{
-        padding: '10px 16px', borderBottom: `1px solid ${COLORS.border}`,
+        padding: '14px 18px', borderBottom: `1px solid ${COLORS.border}`,
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        background: COLORS.bg2,
       }}>
-        <div style={{
-          fontFamily: FONT, fontSize: 10, fontWeight: 600,
-          letterSpacing: '0.12em', textTransform: 'uppercase', color: COLORS.text3,
-        }}>Sample History</div>
-        {history.length > 0 && (
-          <button onClick={onClear} style={{
-            fontFamily: FONT, fontSize: 9, color: COLORS.text3,
-            background: 'transparent', border: `1px solid ${COLORS.border}`,
-            padding: '3px 9px', borderRadius: 2, cursor: 'pointer',
-            letterSpacing: '0.06em', textTransform: 'uppercase',
-          }}>Clear</button>
-        )}
-      </div>
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr>
-              <th style={thStyle}>#</th>
-              <th style={thStyle}>Time</th>
-              <th style={thStyle}>Type</th>
-              <th style={thStyle}>Tag</th>
-              <th style={thStyle}>Receipt</th>
-              <th style={thStyle}>Grower</th>
-              <th style={thStyle}>Total</th>
-              <th style={thStyle}>Perm</th>
-              <th style={thStyle}>Cond</th>
-              <th style={thStyle}>Decay</th>
-              <th style={thStyle}>Defect %</th>
-              <th style={thStyle}>Grade</th>
-            </tr>
-          </thead>
-          <tbody>
-            {history.length === 0 ? (
-              <tr>
-                <td colSpan={12} style={{ ...tdStyle, textAlign: 'center', padding: 28, color: COLORS.text3 }}>
-                  No samples logged yet
-                </td>
-              </tr>
-            ) : (
-              [...history].reverse().map(s => {
-                const result = gradeSample(s)
-                const color = GRADE_TEXT[result.status] || COLORS.text3
-                const bg = GRADE_BG[result.status] || '#f7f7f5'
-
-                return (
-                  <tr key={s.id} style={{
-                    borderBottom: `1px solid ${COLORS.border}`,
-                    opacity: s.isExtra ? 0.6 : 1,
-                  }}>
-                    <td style={{ ...tdStyle, fontWeight: 700, color: COLORS.green }}>{s.dailyPalletNum || '—'}</td>
-                    <td style={tdStyle}>{s.time}</td>
-                    <td style={tdStyle}>
-                      {s.isExtra ? (
-                        <span style={{ fontSize: 9, fontWeight: 600, color: COLORS.purple }}>EXTRA</span>
-                      ) : (
-                        <span style={{ fontSize: 9, fontWeight: 600, color: COLORS.text3 }}>
-                          {s.sampleNum ? `#${s.sampleNum}` : 'SOP'}
-                        </span>
-                      )}
-                    </td>
-                    <td style={{ ...tdStyle, color: COLORS.text }}>{s.lotId || '—'}</td>
-                    <td style={tdStyle}>{s.receiptNum || '—'}</td>
-                    <td style={tdStyle}>{s.grower || '—'}</td>
-                    <td style={tdStyle}>{result.total}</td>
-                    <td style={tdStyle}>{s.permanent || 0}</td>
-                    <td style={tdStyle}>{s.condition || 0}</td>
-                    <td style={{ ...tdStyle, color: (s.decay || 0) > 0 ? COLORS.red : COLORS.text2 }}>
-                      {s.decay || 0}
-                    </td>
-                    <td style={{ ...tdStyle, fontWeight: 600, color }}>
-                      {result.pctCombined}%
-                    </td>
-                    <td style={tdStyle}>
-                      <span style={{
-                        fontFamily: FONT, fontSize: 10, fontWeight: 600,
-                        padding: '2px 7px', borderRadius: 2, letterSpacing: '0.04em',
-                        background: bg, color,
-                      }}>{result.label}</span>
-                    </td>
-                  </tr>
-                )
-              })
+        <div>
+          <div style={{
+            fontFamily: FONT, fontSize: 11, fontWeight: 700,
+            letterSpacing: '0.1em', textTransform: 'uppercase', color: COLORS.text,
+          }}>
+            Sample Log
+          </div>
+          <div style={{
+            fontFamily: FONT, fontSize: 10, color: COLORS.text3, marginTop: 2,
+          }}>
+            {todaySamples.length} today{history.length > todaySamples.length ? ` · ${history.length} total` : ''}
+            {avgScore !== null && (
+              <span style={{ color: avgScore >= 70 ? COLORS.green : avgScore >= 40 ? COLORS.amber : COLORS.red, fontWeight: 600 }}>
+                {' '}· avg score {avgScore}
+              </span>
             )}
-          </tbody>
-        </table>
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {history.length > 5 && (
+            <button onClick={() => setExpanded(!expanded)} style={{
+              fontFamily: FONT, fontSize: 9, fontWeight: 600,
+              color: COLORS.text3, background: 'transparent',
+              border: `1px solid ${COLORS.border}`, padding: '4px 10px',
+              borderRadius: 3, cursor: 'pointer', letterSpacing: '0.06em',
+            }}>{expanded ? 'LESS' : `ALL ${history.length}`}</button>
+          )}
+          {history.length > 0 && (
+            <button onClick={onClear} style={{
+              fontFamily: FONT, fontSize: 9, fontWeight: 600,
+              color: COLORS.red, background: 'transparent',
+              border: `1px solid ${COLORS.red}30`, padding: '4px 10px',
+              borderRadius: 3, cursor: 'pointer', letterSpacing: '0.06em',
+            }}>CLEAR</button>
+          )}
+        </div>
+      </div>
+
+      {/* Sample cards */}
+      <div style={{ padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {shown.length === 0 ? (
+          <div style={{
+            fontFamily: FONT, fontSize: 11, color: COLORS.text3,
+            textAlign: 'center', padding: '24px 0',
+          }}>
+            No samples logged yet
+          </div>
+        ) : shown.map(s => {
+          const result = gradeSample(s)
+          const color = GRADE_TEXT[result.status] || COLORS.text3
+          const bg = GRADE_BG[result.status] || COLORS.bg3
+          const border = GRADE_BORDER[result.status] || COLORS.border
+
+          const typeLabel = s.isSkipped ? 'SKIP' : s.isExtra ? 'EXTRA'
+            : s.sampleNum ? `L${s.sampleNum}` : 'SOP'
+          const typeColor = s.isSkipped ? COLORS.text3
+            : s.isExtra ? COLORS.purple : COLORS.green
+
+          return (
+            <div key={s.id} style={{
+              background: bg, border: `1px solid ${border}`,
+              borderRadius: 6, padding: '10px 14px',
+              opacity: s.isSkipped ? 0.4 : s.isExtra ? 0.7 : 1,
+              display: 'flex', alignItems: 'center', gap: 12,
+            }}>
+              {/* Grade badge */}
+              <div style={{
+                minWidth: 52, textAlign: 'center',
+              }}>
+                <div style={{
+                  fontFamily: FONT, fontSize: 13, fontWeight: 800,
+                  color, letterSpacing: '0.04em', lineHeight: 1,
+                }}>{result.label}</div>
+                <div style={{
+                  fontFamily: FONT, fontSize: 9, color: COLORS.text3, marginTop: 3,
+                }}>{result.pctCombined}%</div>
+              </div>
+
+              <div style={{ width: 1, height: 32, background: border }} />
+
+              {/* Details */}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+                  <span style={{
+                    fontFamily: FONT, fontSize: 10, fontWeight: 700, color: typeColor,
+                  }}>{typeLabel}</span>
+                  <span style={{
+                    fontFamily: FONT, fontSize: 10, fontWeight: 600, color: COLORS.text,
+                  }}>{s.lotId || '—'}</span>
+                  {s.packLine && (
+                    <span style={{ fontFamily: FONT, fontSize: 9, color: COLORS.text3 }}>
+                      L{s.packLine}
+                    </span>
+                  )}
+                  <span style={{
+                    fontFamily: FONT, fontSize: 9, color: COLORS.text3,
+                  }}>{s.time}</span>
+                </div>
+                <div style={{ display: 'flex', gap: 10, fontFamily: FONT, fontSize: 9, color: COLORS.text3 }}>
+                  <span>{result.total} berries</span>
+                  <span style={{ color: COLORS.text2 }}>{s.permanent || 0}P</span>
+                  <span style={{ color: COLORS.text2 }}>{s.condition || 0}C</span>
+                  {(s.decay || 0) > 0 && (
+                    <span style={{ color: COLORS.red, fontWeight: 600 }}>{s.decay}D</span>
+                  )}
+                  {s.grower && <span>{s.grower}</span>}
+                  {s._sampleMethod === 'pint' && <span style={{ color: '#10B981' }}>PINT</span>}
+                </div>
+              </div>
+
+              {/* Score */}
+              <div style={{
+                fontFamily: FONT, fontSize: 18, fontWeight: 800,
+                color, minWidth: 32, textAlign: 'right',
+              }}>
+                {result.score > 0 ? result.score : '—'}
+              </div>
+            </div>
+          )
+        })}
       </div>
     </div>
   )

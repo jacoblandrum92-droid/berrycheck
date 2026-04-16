@@ -2,11 +2,12 @@
 BerryCheck Camera Service
 =========================
 Connects to berrycheck relay as role=grader.
-Streams camera frames with HSV-based berry detection.
+Streams camera frames with berry detection (YOLO if model exists, HSV fallback).
 Receives tuning commands from the browser UI.
 
 Usage: python camera_service.py
 Requires: pip install opencv-python numpy websocket-client
+Optional: pip install ultralytics  (for YOLO mode)
 """
 
 import cv2
@@ -28,9 +29,10 @@ except ImportError:
 # =============================================================
 # CONFIGURATION
 # =============================================================
-CAMERA_INDEX = 1           # 0 = built-in, 1 = USB webcam
+CAMERA_INDEX = 1           # 0 = phantom device, 1 = USB camera
 RELAY_URL = "ws://localhost:5175?role=grader"
 HSV_FILE = "berry_hsv_values.json"
+YOLO_MODEL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ml", "berry_model.pt")
 SNAPSHOT_DIR = "snapshots"
 FRAME_INTERVAL = 0.1       # seconds between frames sent (10 fps)
 JPEG_QUALITY = 70          # lower = smaller frames, faster streaming
@@ -62,8 +64,11 @@ PROFILES = {
 DEFAULTS = PROFILES["blueberry"]["hsv"].copy()
 
 # Detection parameters
-MIN_BERRY_AREA = 300
+MIN_BERRY_AREA = 200       # lowered from 300 — catches partial/occluded berries
 MAX_BERRY_AREA = 50000
+MIN_CIRCULARITY = 0.35     # 1.0 = perfect circle, 0.35 = allows ovals, rejects bars
+PEAK_NEIGHBORHOOD = 19     # px — local-max kernel for splitting merged berry blobs
+MIN_DIST_PEAK = 4          # min distance-transform value to count as a berry center
 USE_BLUR = True
 
 
@@ -74,11 +79,31 @@ class CameraService:
         self.use_blur = USE_BLUR
         self.min_area = MIN_BERRY_AREA
         self.max_area = MAX_BERRY_AREA
+        self.min_circularity = MIN_CIRCULARITY
         self.running = False
         self.ws = None
         self._ws_connected = False
         self.cap = None
         self.streaming = True  # can be paused from browser
+        self._capture_training = False
+        self.yolo_model = None
+        self.detection_mode = "hsv"  # "hsv" or "yolo"
+        self._load_yolo()
+
+    def _load_yolo(self):
+        """Try to load YOLO model. Falls back to HSV if not available."""
+        if not os.path.exists(YOLO_MODEL):
+            print("[detect] No YOLO model found, using HSV detection")
+            return
+        try:
+            from ultralytics import YOLO
+            self.yolo_model = YOLO(YOLO_MODEL)
+            self.detection_mode = "yolo"
+            print(f"[detect] YOLO model loaded from {YOLO_MODEL}")
+        except ImportError:
+            print("[detect] ultralytics not installed, using HSV detection")
+        except Exception as e:
+            print(f"[detect] YOLO load failed ({e}), using HSV detection")
 
     def load_hsv(self):
         if os.path.exists(HSV_FILE):
@@ -98,6 +123,69 @@ class CameraService:
         print(f"[hsv] Saved to {HSV_FILE}")
 
     def process_frame(self, frame):
+        """Detect berries — always HSV for live feed (fast). YOLO used only for label captures."""
+        return self._process_frame_hsv(frame)
+
+    def _yolo_detect(self, frame):
+        """Run YOLO once on a frame, return deduplicated berries list."""
+        results = self.yolo_model(frame, verbose=False, conf=0.30)[0]
+        raw = []
+        for box in results.boxes:
+            x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().astype(int)
+            cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+            r = max(x2 - x1, y2 - y1) // 2
+            conf = float(box.conf[0])
+            raw.append({"x": int(cx), "y": int(cy), "r": int(r), "area": int((x2-x1)*(y2-y1)), "circ": conf})
+
+        # Deduplicate — merge overlapping detections, keep highest confidence
+        raw.sort(key=lambda b: b["circ"], reverse=True)
+        berries = []
+        for b in raw:
+            too_close = False
+            for kept in berries:
+                dist = ((b["x"] - kept["x"]) ** 2 + (b["y"] - kept["y"]) ** 2) ** 0.5
+                if dist < max(b["r"], kept["r"]) * 1.2:
+                    too_close = True
+                    break
+            if not too_close:
+                berries.append(b)
+
+        print(f"[yolo] {len(raw)} raw → {len(berries)} after dedup")
+        return berries
+
+    def _process_frame_yolo(self, frame):
+        """YOLO-based berry detection."""
+        results = self.yolo_model(frame, verbose=False, conf=0.30)[0]
+
+        berries = []
+        berry_count = 0
+        # Generate a blank mask (YOLO doesn't use HSV but UI expects one)
+        mask = np.zeros(frame.shape[:2], dtype=np.uint8)
+
+        for box in results.boxes:
+            berry_count += 1
+            x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().astype(int)
+            conf = float(box.conf[0])
+            cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+            r = max(x2 - x1, y2 - y1) // 2
+
+            berries.append({"x": cx, "y": cy, "r": r, "area": (x2-x1)*(y2-y1), "circ": conf})
+
+            # Draw on frame
+            cv2.circle(frame, (cx, cy), r, (0, 255, 0), 2)
+            cv2.putText(frame, str(berry_count),
+                        (cx - 8, cy - r - 5),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+            # Fill mask for UI consistency
+            cv2.circle(mask, (cx, cy), r, 255, -1)
+
+        cv2.putText(frame, f"Berries: {berry_count} (YOLO)", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+
+        filtered = cv2.bitwise_and(frame, frame, mask=mask)
+        return frame, mask, filtered, berry_count, berries
+
+    def _process_frame_hsv(self, frame):
         """Apply HSV mask, find berries, return annotated frame + detection data."""
         hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
@@ -119,18 +207,34 @@ class CameraService:
 
         berries = []
         berry_count = 0
+        split_attempts = 0
         for contour in contours:
             area = cv2.contourArea(contour)
-            if self.min_area < area < self.max_area:
+            if area < self.min_area or area > self.max_area:
+                continue
+
+            # Circularity filter — reject long/thin shapes (rollers, bars)
+            perimeter = cv2.arcLength(contour, True)
+            if perimeter == 0:
+                continue
+            circularity = 4 * 3.14159 * area / (perimeter * perimeter)
+
+            if circularity >= self.min_circularity:
+                # Single berry — passes both filters
                 berry_count += 1
                 (x, y), radius = cv2.minEnclosingCircle(contour)
                 cx, cy, r = int(x), int(y), int(radius)
-                berries.append({"x": cx, "y": cy, "r": r, "area": int(area)})
-                # Draw on frame
+                berries.append({"x": cx, "y": cy, "r": r, "area": int(area), "circ": round(circularity, 2)})
                 cv2.circle(frame, (cx, cy), r, (0, 255, 0), 2)
                 cv2.putText(frame, str(berry_count),
                             (cx - 8, cy - r - 5),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+            else:
+                # Failed circularity — likely merged berries, try to split (max 10/frame)
+                if split_attempts < 10:
+                    split_attempts += 1
+                    split_count = self._split_merged(contour, mask, frame, berries, berry_count)
+                    berry_count += split_count
 
         # Overlay info
         cv2.putText(frame, f"Berries: {berry_count}", (10, 30),
@@ -140,6 +244,68 @@ class CameraService:
         filtered = cv2.bitwise_and(frame, frame, mask=mask)
 
         return frame, mask, filtered, berry_count, berries
+
+    def _split_merged(self, contour, full_mask, frame, berries, start_count):
+        """Split a merged contour into individual berries using distance transform peaks.
+
+        When two berries touch, they form one blob that fails circularity.
+        The distance transform finds the center of each berry (local maxima),
+        so we can count them individually.
+        """
+        # Must be big enough to contain at least 2 berries
+        area = cv2.contourArea(contour)
+        if area < self.min_area * 2:
+            return 0
+
+        # Reject very elongated shapes — those are roller bars, not merged berries
+        rect = cv2.minAreaRect(contour)
+        w, h = rect[1]
+        if w > 0 and h > 0:
+            aspect = max(w, h) / min(w, h)
+            if aspect > 3.0:
+                return 0
+
+        # Work on bounding rect only — much faster than full-frame arrays
+        bx, by, bw, bh = cv2.boundingRect(contour)
+        sub_mask = np.zeros((bh, bw), dtype=np.uint8)
+        shifted = contour - [bx, by]
+        cv2.drawContours(sub_mask, [shifted], -1, 255, -1)
+
+        # Distance transform — berry centers become peaks
+        dist = cv2.distanceTransform(sub_mask, cv2.DIST_L2, 5)
+
+        # Find local maxima
+        peak_kernel = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE, (PEAK_NEIGHBORHOOD, PEAK_NEIGHBORHOOD)
+        )
+        dilated = cv2.dilate(dist, peak_kernel)
+        local_max = ((dist == dilated) & (dist > MIN_DIST_PEAK)).astype(np.uint8) * 255
+
+        num_peaks, peak_labels = cv2.connectedComponents(local_max)
+
+        if num_peaks <= 1:
+            return 0
+
+        found = 0
+        for peak_id in range(1, num_peaks):
+            ys, xs = np.where(peak_labels == peak_id)
+            if len(xs) == 0:
+                continue
+            # Convert back to full-frame coordinates
+            cx, cy = int(xs.mean()) + bx, int(ys.mean()) + by
+            local_cy, local_cx = int(ys.mean()), int(xs.mean())
+            r = max(int(dist[local_cy, local_cx]), 5)
+            area_est = int(3.14159 * r * r)
+            if area_est < self.min_area // 2:
+                continue
+            found += 1
+            idx = start_count + found
+            berries.append({"x": cx, "y": cy, "r": r, "area": area_est, "circ": 0.0})
+            cv2.circle(frame, (cx, cy), r, (0, 255, 0), 2)
+            cv2.putText(frame, str(idx), (cx - 8, cy - r - 5),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
+        return found
 
     def frame_to_jpeg_base64(self, frame):
         """Encode frame as JPEG base64 for WebSocket transport."""
@@ -197,6 +363,9 @@ class CameraService:
                 self.profile = name
                 print(f"[profile] Switched to {p['label']}")
 
+        elif action == "capture_training":
+            self._capture_training = True
+
         elif action == "set_camera":
             idx = msg.get("index", CAMERA_INDEX)
             self._switch_camera(idx)
@@ -250,39 +419,64 @@ class CameraService:
     def on_ws_error(self, ws, error):
         print(f"[ws] Error: {error}")
 
+    def _find_working_camera(self):
+        """Scan indices 1-4 and return the first camera that actually grabs frames.
+        Skips index 0 — that's the laptop webcam/phantom device, not a USB camera."""
+        for idx in range(1, 5):
+            cap = cv2.VideoCapture(idx)
+            if cap.isOpened():
+                ret, frame = cap.read()
+                if ret:
+                    print(f"[camera] Found working camera at index {idx}")
+                    return cap, idx
+                cap.release()
+        return None, None
+
     def run(self):
         # Open camera
         print(f"\n=== BerryCheck Camera Service ===")
-        print(f"Camera index: {CAMERA_INDEX}")
+        print(f"Preferred camera index: {CAMERA_INDEX}")
         print(f"Relay: {RELAY_URL}")
 
+        # Try preferred index first
         self.cap = cv2.VideoCapture(CAMERA_INDEX)
-        if not self.cap.isOpened():
-            print(f"\n[ERROR] Could not open camera {CAMERA_INDEX}")
-            print("Try changing CAMERA_INDEX at the top of this file")
+        found_idx = CAMERA_INDEX
+        if self.cap.isOpened():
+            ret, test_frame = self.cap.read()
+            if not ret:
+                print(f"[WARN] Camera {CAMERA_INDEX} can't grab frames, scanning for alternatives...")
+                self.cap.release()
+                self.cap, found_idx = self._find_working_camera()
+        else:
+            print(f"[WARN] Camera {CAMERA_INDEX} unavailable, scanning for alternatives...")
+            self.cap, found_idx = self._find_working_camera()
+
+        if self.cap is None:
+            print(f"\n[ERROR] No working camera found (scanned indices 0-4)")
             return
 
-        # Try to set 1080p — if camera doesn't support it, it uses its default
+        # Try to set 1080p — release and reopen to avoid corrupted state
+        self.cap.release()
+        self.cap = cv2.VideoCapture(found_idx)
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
-
-        # Verify camera can actually grab a frame
         ret, test_frame = self.cap.read()
         if not ret:
-            print(f"[WARN] Camera {CAMERA_INDEX} opened but can't grab frames at 1920x1080, trying default resolution...")
+            # 1080p didn't work — reopen at default resolution
+            print(f"[WARN] 1080p failed on camera {found_idx}, using default resolution...")
             self.cap.release()
-            self.cap = cv2.VideoCapture(CAMERA_INDEX)
+            self.cap = cv2.VideoCapture(found_idx)
             if not self.cap.isOpened():
-                print(f"[ERROR] Could not reopen camera {CAMERA_INDEX}")
+                print(f"[ERROR] Could not reopen camera {found_idx}")
                 return
             ret, test_frame = self.cap.read()
             if not ret:
-                print(f"[ERROR] Camera {CAMERA_INDEX} cannot grab frames")
+                print(f"[ERROR] Camera {found_idx} cannot grab frames after reopen")
                 return
 
         w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        print(f"Camera resolution: {w}x{h}")
+        print(f"Camera resolution: {w}x{h} (index {found_idx})")
 
         self.running = True
         self._count_history = []
@@ -337,6 +531,23 @@ class CameraService:
                     cv2.imwrite(f"{SNAPSHOT_DIR}/{ts}_mask.png", mask)
                     cv2.imwrite(f"{SNAPSHOT_DIR}/{ts}_filtered.jpg", filtered)
                     print(f"[snapshot] Saved {ts}")
+
+                # Training capture requested — use YOLO if available for better auto-labels
+                if self._capture_training:
+                    self._capture_training = False
+                    if self.yolo_model is not None:
+                        yolo_berries = self._yolo_detect(frame)
+                        capture_berries = yolo_berries
+                    else:
+                        capture_berries = berries
+                    self.send_msg({
+                        "type": "training_capture",
+                        "raw": self.frame_to_jpeg_base64(frame),
+                        "berries": capture_berries,
+                        "width": int(frame.shape[1]),
+                        "height": int(frame.shape[0]),
+                    })
+                    print(f"[training] Captured frame with {len(berries)} auto-labels")
 
                 # Rate-limit WebSocket sends
                 now = time.time()

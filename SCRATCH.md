@@ -103,6 +103,55 @@
 
 ## From Claude Code
 
+### Session 2026-04-14/15 — Camera Detection + YOLO Training Pipeline
+
+**Camera detection — dual mode:**
+- **Live feed:** HSV detection (fast, keeps CPU cool). Used for real-time count display.
+- **LABEL mode:** YOLO inference on-demand. Runs once when user clicks LABEL, pre-fills berry markers for correction.
+- `process_frame()` always uses HSV. YOLO only fires via `_yolo_detect()` during training captures.
+
+**YOLO training pipeline built (`app/ml/`):**
+- `capture.py` — captures frames + auto-labels from HSV (standalone script, `--camera 1`)
+- `train.py` — trains YOLOv8n, auto-splits train/val, saves `berry_model.pt`
+- `dataset.yaml` — YOLO dataset config
+- `dataset/` — images + YOLO-format labels (38 samples as of end of session)
+- `dataset_backup_38samples/` — safety backup
+
+**In-app labeling UI (CameraTuner.jsx):**
+- LABEL button freezes frame, pre-fills YOLO guesses (or empty if no model)
+- Click to add berry marker, click existing marker to remove
+- Scroll wheel to resize label radius, `r=N` indicator in corner
+- SAVE writes image + corrected YOLO labels to `ml/dataset/` via server API
+- Training count shown in header ("N labeled")
+- Canvas click coordinates account for `objectFit: contain` letterboxing
+
+**Training history:**
+- v1 (6 samples): P=10.7%, R=97%, mAP50=47.7% — found everything, tons of false positives
+- v2 (16 samples): P=81.2%, R=78.6%, mAP50=77.7% — **best so far, currently deployed**
+- v3 (28 samples): P=70.6%, R=72.9%, mAP50=67.6% — regressed, rolled back to v2
+- v3 regression likely from noisy labels in early auto-filled rounds. Need cleaner labels going forward.
+- Confidence threshold: 0.30 (tuned for v2). Dedup merges overlapping detections.
+
+**Server changes (server.js):**
+- Added Vite proxy: `/api` → `localhost:5175` (fixes API calls from Vite dev server on 5174)
+- Added `training_capture` to grader→dashboard relay
+- Added `POST /api/training-data` — saves image + YOLO labels
+- Added `GET /api/training-count` — returns labeled image count
+- Added `POST /api/start-training` — spawns train.py
+
+**Camera service changes:**
+- Camera index 0 (laptop webcam) permanently skipped in fallback scan
+- HSV `min_area` lowered 300→200, `_split_merged()` for merged contours (distance transform)
+- Split attempts capped at 10/frame, uses bounding rect (not full frame) for performance
+- YOLO auto-loads from `ml/berry_model.pt` on startup, falls back to HSV
+- `capture_training` command sends raw frame + YOLO detections to UI
+
+**Next steps:**
+- Need more berries for varied samples
+- Label carefully (v3 regression was likely from noisy labels)
+- Retrain when ~50+ clean samples accumulated
+- Consider: auto-adjusting conf threshold based on model metrics after training
+
 ### Session 2026-03-29
 - Integrated HSV camera tuner into BerryCheck as `app/camera_service.py`
 - Camera connects to relay as `role=grader`, streams frames via WebSocket

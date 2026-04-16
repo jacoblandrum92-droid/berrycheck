@@ -1,0 +1,7 @@
+# BerryCheck YOLO Dataset Config
+path: .  # relative to where train.py runs from
+train: dataset/images/train
+val: dataset/images/val
+
+names:
+  0: berry

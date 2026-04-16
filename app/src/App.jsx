@@ -82,7 +82,7 @@ function Dashboard() {
     const keys = ['bc_history', 'bc_packlog', 'bc_receipts', 'bc_packplan',
       'bc_prepack', 'bc_dc_results', 'bc_features', 'bc_packcodes_db',
       'bc_packcodes_favorites', 'bc_zones', 'bc_accuracy', 'bc_training',
-      'bc_compliance_config', 'bc_compliance_done']
+      'bc_compliance_config', 'bc_compliance_done', 'bc_compliance_custom']
     Promise.all(keys.map(key =>
       fetch('/api/store/' + key).then(r => r.json()).then(data => {
         if (data !== null) localStorage.setItem(key, JSON.stringify(data))
@@ -109,6 +109,7 @@ function Dashboard() {
 
   // Lot info
   const [lotId, setLotId] = useState('')
+  const [packLine, setPackLine] = useState('')
   const [receiptNum, setReceiptNum] = useState('')
   const [grower, setGrower] = useState('')
   const [variety, setVariety] = useState('')
@@ -138,6 +139,10 @@ function Dashboard() {
   const [showBarcodeSheet, setShowBarcodeSheet] = useState(false)
   const [showGradingGuide, setShowGradingGuide] = useState(false)
   const [showPhoneQR, setShowPhoneQR] = useState(false)
+  const [showCameraPanel, setShowCameraPanel] = useState(false)
+  const [showScalePanel, setShowScalePanel] = useState(false)
+
+
   const [pendingZoneCounts, setPendingZoneCounts] = useState(null) // { counts, image, zones }
   const [showPackLog, setShowPackLog] = useState(false)
   const [showPackCodes, setShowPackCodes] = useState(false)
@@ -235,6 +240,10 @@ function Dashboard() {
   }, [])
 
   const { connected, phonesOnline, graderConnected, scaleConnected, scaleWeight, scalePort, sendScaleCommand, wsRef } = useRelay('dashboard', handleRelayImage, handleSync)
+
+  // Auto-expand camera/scale panels when hardware connects
+  useEffect(() => { if (graderConnected) setShowCameraPanel(true) }, [graderConnected])
+  useEffect(() => { if (scaleConnected) setShowScalePanel(true) }, [scaleConnected])
 
   // Push daily summary to server for viewer/archive access
   const pushDailySummary = useCallback((h) => {
@@ -343,7 +352,7 @@ function Dashboard() {
       id: Date.now(),
       time: new Date().toLocaleTimeString('en-US', { hour12: false }),
       date: new Date().toLocaleDateString(),
-      lotId, dailyPalletNum, receiptNum, grower, variety, packCriteria,
+      lotId, dailyPalletNum, packLine, receiptNum, grower, variety, packCriteria,
       ...counts,
       isExtra,
       sampleNum: isExtra ? null : officialCount + 1,
@@ -422,7 +431,7 @@ function Dashboard() {
       newSamples.push({
         id: Date.now() + i,
         time, date,
-        lotId, dailyPalletNum, receiptNum, grower, variety, packCriteria,
+        lotId, dailyPalletNum, packLine, receiptNum, grower, variety, packCriteria,
         good: 0, permanent: 0, condition: 0, decay: 0,
         isExtra: false, isSkipped: true, isMissed: true,
         sampleNum: i + 1,
@@ -638,183 +647,191 @@ function Dashboard() {
       {view === 'qc' ? (
         /* ========== QC MODE ========== */
         <div style={{ minHeight: 'calc(100vh - 90px)' }}>
-          {/* Grade summary header — sticky at top */}
+          {/* ===== SAMPLE BOX — Center of attention ===== */}
           <div style={{
-            padding: '12px 32px', borderBottom: `1px solid ${COLORS.border}`,
-            position: 'sticky', top: 0, zIndex: 100,
-            background: COLORS.bg, boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+            maxWidth: 640, margin: '20px auto 0', padding: '0 20px',
           }}>
-            <ScoreDisplay counts={counts} packCriteria={packCriteria} tolerances={GRADING_STANDARDS[gradingStandard].tolerances} />
-          </div>
-
-          {/* Weather context banner */}
-          <div style={{ padding: '4px 32px 0' }}>
-            <WeatherBanner />
-          </div>
-
-          {/* Pre-pack notes banner for active receipt */}
-          {receiptNum && (
-            <div style={{ padding: '0 32px' }}>
-              <PrePackBanner receiptNum={receiptNum} />
-            </div>
-          )}
-
-          {/* Pallet & pack management — collapsible */}
-          <details style={{ borderBottom: `1px solid ${COLORS.border}` }}>
-            <summary style={{
-              fontFamily: FONT, fontSize: 9, fontWeight: 600, color: COLORS.text3,
-              letterSpacing: '0.08em', textTransform: 'uppercase',
-              padding: '6px 32px', cursor: 'pointer', background: COLORS.bg,
-              listStyle: 'none', display: 'flex', alignItems: 'center', gap: 8,
-            }}>
-              <span style={{ fontSize: 8 }}>&#9654;</span> PALLET / PACK
-              {receiptNum && <span style={{ color: COLORS.green, fontWeight: 400, textTransform: 'none', letterSpacing: '0.02em' }}>— {receiptNum} {grower}</span>}
-              {lotId && (() => {
-                const officialCount = history.filter(s => s.lotId === lotId && !s.isExtra).length
-                const layerNames = { 0: '#1 BTM', 1: '#2 MID', 2: '#3 TOP' }
-                return <span style={{ color: officialCount >= 3 ? COLORS.amber : COLORS.green, fontWeight: 400, textTransform: 'none' }}>
-                  {officialCount >= 3 ? '3/3' : layerNames[officialCount]}
-                </span>
-              })()}
-            </summary>
-
-            <PalletBuilder
-              dailyPalletNum={dailyPalletNum}
-              palletTag={lotId} setPalletTag={setLotId}
-              palletReceipts={palletReceipts}
-              onAddReceipt={addReceiptToPallet}
-              onUpdateBoxes={updateReceiptBoxes}
-              onRemoveReceipt={removeReceiptFromPallet}
-              onSelectReceipt={selectReceiptForQC}
-              packCode={packCode} setPackCode={setPackCode}
-              currentReceiptNum={receiptNum}
-            />
-
-            {/* QC toolbar */}
             <div style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              padding: '6px 32px',
-              borderBottom: `1px solid ${COLORS.border}`,
               background: COLORS.bg,
+              border: `2px solid ${COLORS.border2}`,
+              borderRadius: 10,
+              overflow: 'hidden',
+              boxShadow: '0 2px 12px rgba(0,0,0,0.06)',
             }}>
-              {features.receipts !== false && (
-                <button onClick={() => setShowReceipts(true)} style={{
-                  fontFamily: FONT, fontSize: 9, color: COLORS.amber,
-                  background: 'transparent', border: `1px solid ${COLORS.amberDim}`,
-                  padding: '3px 10px', borderRadius: 3, cursor: 'pointer',
-                  letterSpacing: '0.06em',
-                }}>RECEIPTS</button>
-              )}
-              <button onClick={() => setShowPackCodes(true)} style={{
-                fontFamily: FONT, fontSize: 9, color: COLORS.text3,
-                background: 'transparent', border: `1px solid ${COLORS.border}`,
-                padding: '3px 10px', borderRadius: 3, cursor: 'pointer',
-                letterSpacing: '0.06em',
-              }}>PACK CODES</button>
-              <button onClick={() => setShowPrePack(true)} style={{
-                fontFamily: FONT, fontSize: 9, color: COLORS.green,
-                background: 'transparent', border: `1px solid ${COLORS.greenDim}`,
-                padding: '3px 10px', borderRadius: 3, cursor: 'pointer',
-                letterSpacing: '0.06em',
-              }}>PRE-PACK</button>
-            </div>
 
-            {/* Pack plan */}
-            {features.packPlan !== false && (
-              <div style={{ padding: '6px 32px' }}>
-                <PackPlan packLog={(() => {
-                  try { return JSON.parse(localStorage.getItem('bc_packlog') || '[]') } catch { return [] }
-                })()} />
-              </div>
-            )}
-
-            {/* Pack criteria + layer indicator */}
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 12,
-              padding: '6px 32px', borderBottom: `1px solid ${COLORS.border}`,
-              background: COLORS.bg,
-            }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <div style={{ display: 'flex', gap: 4 }}>
-                  {Object.entries(PACK_CRITERIA).map(([key, pc]) => (
-                    <button key={key} onClick={() => setPackCriteria(key)}
-                      title={pc.description}
-                      style={{
-                        fontFamily: FONT, fontSize: 10, fontWeight: 600,
-                        color: packCriteria === key ? COLORS.green : COLORS.text3,
-                        background: packCriteria === key ? COLORS.greenDim : 'transparent',
-                        border: `1px solid ${packCriteria === key ? COLORS.green : COLORS.border}`,
-                        padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
-                      }}>
-                      {pc.label}
-                    </button>
-                  ))}
+              {/* Pallet identity — compact top bar */}
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 12,
+                padding: '10px 16px',
+                background: COLORS.bg2, borderBottom: `1px solid ${COLORS.border}`,
+              }}>
+                <div style={{ textAlign: 'center', minWidth: 40 }}>
+                  <div style={{ fontFamily: FONT, fontSize: 8, color: COLORS.text3, letterSpacing: '0.08em' }}>DAILY</div>
+                  <div style={{ fontFamily: FONT, fontSize: 20, fontWeight: 800, color: COLORS.green, lineHeight: 1 }}>#{dailyPalletNum}</div>
                 </div>
-                {PACK_CRITERIA[packCriteria]?.spec && (
-                  <div style={{ fontFamily: FONT, fontSize: 9, color: COLORS.green, letterSpacing: '0.02em' }}>
-                    {PACK_CRITERIA[packCriteria].spec}
-                  </div>
-                )}
+                <div style={{ width: 1, height: 28, background: COLORS.border }} />
+                <div style={{ flex: 1, minWidth: 120 }}>
+                  <div style={{ fontFamily: FONT, fontSize: 8, color: COLORS.text3, letterSpacing: '0.08em', marginBottom: 2 }}>PALLET TAG</div>
+                  <input
+                    value={lotId}
+                    onChange={e => setLotId(e.target.value)}
+                    placeholder="scan or type"
+                    style={{
+                      background: COLORS.bg3, border: `1px solid ${COLORS.border2}`,
+                      color: COLORS.text, fontFamily: FONT, fontSize: 14, fontWeight: 600,
+                      padding: '5px 10px', borderRadius: 3, outline: 'none',
+                      boxSizing: 'border-box', width: '100%',
+                    }}
+                  />
+                </div>
+                <div style={{ width: 1, height: 28, background: COLORS.border }} />
+                <div style={{ minWidth: 60 }}>
+                  <div style={{ fontFamily: FONT, fontSize: 8, color: COLORS.text3, letterSpacing: '0.08em', marginBottom: 2 }}>LINE</div>
+                  <input
+                    value={packLine}
+                    onChange={e => setPackLine(e.target.value)}
+                    placeholder="#"
+                    style={{
+                      background: COLORS.bg3, border: `1px solid ${COLORS.border2}`,
+                      color: COLORS.text, fontFamily: FONT, fontSize: 14, fontWeight: 600,
+                      padding: '5px 10px', borderRadius: 3, outline: 'none',
+                      boxSizing: 'border-box', width: '100%',
+                    }}
+                  />
+                </div>
+                {(() => {
+                  const officialCount = lotId ? history.filter(s => s.lotId === lotId && !s.isExtra).length : 0
+                  if (!lotId) return null
+                  const layerNames = { 0: '#1 BOTTOM', 1: '#2 MIDDLE', 2: '#3 TOP' }
+                  return (
+                    <div style={{
+                      fontFamily: FONT, fontSize: 12, fontWeight: 700,
+                      color: officialCount >= 3 ? COLORS.amber : COLORS.green,
+                      letterSpacing: '0.04em', whiteSpace: 'nowrap',
+                    }}>
+                      {officialCount >= 3 ? '3/3 DONE' : `NEXT: ${layerNames[officialCount]}`}
+                    </div>
+                  )
+                })()}
               </div>
-              <div style={{ flex: 1 }} />
-              {(() => {
-                const officialCount = lotId ? history.filter(s => s.lotId === lotId && !s.isExtra).length : 0
-                const layerNames = { 0: '#1 BOTTOM', 1: '#2 MIDDLE', 2: '#3 TOP' }
-                return (
-                  <div style={{ fontFamily: FONT, fontSize: 11, display: 'flex', alignItems: 'center', gap: 8 }}>
-                    {officialCount < 3 ? (
-                      <span style={{ color: COLORS.green, fontWeight: 600 }}>NEXT: {layerNames[officialCount] || 'SAMPLE'}</span>
-                    ) : (
-                      <span style={{ color: COLORS.amber, fontWeight: 600 }}>3/3 DONE</span>
-                    )}
-                    {officialCount < 3 && (
-                      <>
-                        <button onClick={skipLayer} style={{
-                          fontFamily: FONT, fontSize: 9, color: COLORS.text3,
-                          background: 'transparent', border: `1px solid ${COLORS.border}`,
-                          padding: '3px 8px', borderRadius: 3, cursor: 'pointer',
-                        }}>SKIP LAYER</button>
-                        <button onClick={skipPallet} style={{
-                          fontFamily: FONT, fontSize: 9, color: COLORS.red,
-                          background: 'transparent', border: `1px solid ${COLORS.redDim}`,
-                          padding: '3px 8px', borderRadius: 3, cursor: 'pointer',
-                        }}>MISS PALLET</button>
-                      </>
-                    )}
-                    {receiptNum && (
-                      <span style={{ fontFamily: FONT, fontSize: 9, color: COLORS.text3 }}>QC: {receiptNum} ({grower})</span>
-                    )}
-                  </div>
-                )
-              })()}
-            </div>
-          </details>
 
-          {/* Main QC area — camera + inputs + details */}
-          <div style={{
-            display: 'grid', gridTemplateColumns: '1fr 1fr',
-            gap: 24, padding: '20px 32px',
-            alignContent: 'start',
-          }}>
-            {/* LEFT — Camera + sample input */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {/* Camera tuner — always visible */}
-              <CameraTuner
-                wsRef={wsRef}
-                graderConnected={graderConnected}
-                onUseCount={(count) => {
-                  setCounts(prev => ({ ...prev, _fullcountTotal: count, _source: 'grader' }))
-                  // Auto-select fullcount method when grader sends count
-                  if (sampleMethod !== 'fullcount') setSampleMethod('fullcount')
-                }}
-              />
-
-              {/* Incoming image from phone */}
-              {incomingImage ? (
+              {/* Receipt context — thin strip when set */}
+              {receiptNum && (
                 <div style={{
-                  background: COLORS.bg2, border: `1px solid ${COLORS.border}`,
-                  borderRadius: 4, padding: 10,
+                  padding: '4px 16px',
+                  background: COLORS.bg2,
+                  borderBottom: `1px solid ${COLORS.border}`,
                 }}>
+                  <span style={{ fontFamily: FONT, fontSize: 10, color: COLORS.text3 }}>
+                    {receiptNum} ({grower}){variety ? ` \u00b7 ${variety}` : ''}
+                  </span>
+                </div>
+              )}
+
+              {/* Live grade display — integrated in card */}
+              <div style={{ padding: '10px 16px', borderBottom: `1px solid ${COLORS.border}` }}>
+                <ScoreDisplay counts={counts} packCriteria={packCriteria} tolerances={GRADING_STANDARDS[gradingStandard].tolerances} />
+              </div>
+
+              {/* Tools row — camera, scale, logs */}
+              <div style={{
+                display: 'flex', gap: 6, padding: '8px 16px',
+                borderBottom: `1px solid ${COLORS.border}`,
+              }}>
+                <button onClick={() => setShowCameraPanel(p => !p)} style={{
+                  fontFamily: FONT, fontSize: 9, fontWeight: 600,
+                  color: graderConnected ? COLORS.green : COLORS.text3,
+                  background: showCameraPanel ? COLORS.bg3 : 'transparent',
+                  border: `1px solid ${graderConnected ? COLORS.green : COLORS.border}`,
+                  padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
+                  letterSpacing: '0.06em',
+                }}>CAMERA {graderConnected ? '\u25cf' : ''}</button>
+                <button onClick={() => setShowScalePanel(p => !p)} style={{
+                  fontFamily: FONT, fontSize: 9, fontWeight: 600,
+                  color: scaleConnected ? COLORS.green : COLORS.text3,
+                  background: showScalePanel ? COLORS.bg3 : 'transparent',
+                  border: `1px solid ${scaleConnected ? COLORS.green : COLORS.border}`,
+                  padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
+                  letterSpacing: '0.06em',
+                }}>SCALE {scaleConnected ? '\u25cf' : ''}</button>
+                <div style={{ flex: 1 }} />
+                <button onClick={() => setShowLogManager(true)} style={{
+                  fontFamily: FONT, fontSize: 9, fontWeight: 600,
+                  color: COLORS.amber, background: 'transparent',
+                  border: `1px solid ${COLORS.amberDim}`,
+                  padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
+                  letterSpacing: '0.06em',
+                }}>LOGS</button>
+              </div>
+
+              {/* Camera panel — expandable */}
+              {showCameraPanel && (
+                <div style={{ padding: '8px 16px', borderBottom: `1px solid ${COLORS.border}`, background: COLORS.bg2 }}>
+                  <CameraTuner
+                    wsRef={wsRef}
+                    graderConnected={graderConnected}
+                    onUseCount={(countOrObj) => {
+                      if (typeof countOrObj === 'object' && countOrObj.zones) {
+                        // Zone-aware count — auto-populate defects
+                        const { total, zones } = countOrObj
+                        setCounts(prev => ({
+                          ...prev,
+                          _fullcountTotal: total,
+                          _source: 'grader',
+                          scars: (prev.scars || 0) + (zones.scars || 0),
+                          condition: (prev.condition || 0) + (zones.condition || 0),
+                          greenRed: (prev.greenRed || 0) + (zones.greenRed || 0),
+                        }))
+                      } else {
+                        setCounts(prev => ({ ...prev, _fullcountTotal: countOrObj, _source: 'grader' }))
+                      }
+                      if (sampleMethod !== 'fullcount' && sampleMethod !== 'pint') setSampleMethod('fullcount')
+                    }}
+                  />
+                  {!incomingImage && (
+                    <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                      <button onClick={() => setShowPhoneQR(true)} style={{
+                        flex: 1, fontFamily: FONT, fontSize: 10, color: COLORS.text3,
+                        background: COLORS.bg, border: `1px solid ${COLORS.border}`,
+                        padding: '8px', borderRadius: 4, cursor: 'pointer',
+                        letterSpacing: '0.06em', textAlign: 'center',
+                      }}>PHONE CAMERA</button>
+                      <button onClick={() => {
+                        fetch('/api/restart-camera', { method: 'POST' }).catch(() => {})
+                      }} style={{
+                        flex: 1, fontFamily: FONT, fontSize: 10, color: COLORS.text3,
+                        background: COLORS.bg, border: `1px solid ${COLORS.border}`,
+                        padding: '8px', borderRadius: 4, cursor: 'pointer',
+                        letterSpacing: '0.06em', textAlign: 'center',
+                      }}>COUNTING CAMERA</button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Scale panel — expandable */}
+              {showScalePanel && (
+                <div style={{ padding: '8px 16px', borderBottom: `1px solid ${COLORS.border}`, background: COLORS.bg2 }}>
+                  <ScaleCapture
+                    scaleConnected={scaleConnected}
+                    scaleWeight={scaleWeight}
+                    capturedWeight={capturedWeight}
+                    onWeightCapture={(weight, source) => {
+                      if (weight == null) {
+                        setCapturedWeight(null)
+                        setCounts(prev => ({ ...prev, _packWeight: 0, _scaleSource: null }))
+                      } else {
+                        setCapturedWeight({ weight, _source: source })
+                        setCounts(prev => ({ ...prev, _packWeight: weight, _scaleSource: source }))
+                      }
+                    }}
+                  />
+                </div>
+              )}
+
+              {/* Incoming image from phone — shows when received */}
+              {incomingImage && (
+                <div style={{ padding: '8px 16px', borderBottom: `1px solid ${COLORS.border}`, background: COLORS.bg2 }}>
                   <div style={{
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                     marginBottom: 6,
@@ -847,7 +864,7 @@ function Dashboard() {
                     src={incomingImage.data}
                     onClick={() => setShowZoneEditor(true)}
                     style={{
-                      width: '100%', maxHeight: 180, objectFit: 'contain',
+                      width: '100%', maxHeight: 160, objectFit: 'contain',
                       borderRadius: 3, border: `1px solid ${COLORS.border}`,
                       cursor: 'pointer',
                     }}
@@ -860,61 +877,25 @@ function Dashboard() {
                     }}>COUNTING...</div>
                   )}
                 </div>
-              ) : (
-                <div style={{
-                  display: 'flex', gap: 8,
-                }}>
-                  <button onClick={() => setShowPhoneQR(true)} style={{
-                    flex: 1, fontFamily: FONT, fontSize: 10, color: COLORS.text3,
-                    background: COLORS.bg2, border: `1px solid ${COLORS.border}`,
-                    padding: '12px', borderRadius: 4, cursor: 'pointer',
-                    letterSpacing: '0.06em', textAlign: 'center',
-                  }}>
-                    PHONE CAMERA
-                  </button>
-                  <button onClick={() => {
-                    // Retry the counting camera (grader)
-                    fetch('/api/restart-camera', { method: 'POST' }).catch(() => {})
-                  }} style={{
-                    flex: 1, fontFamily: FONT, fontSize: 10, color: COLORS.text3,
-                    background: COLORS.bg2, border: `1px solid ${COLORS.border}`,
-                    padding: '12px', borderRadius: 4, cursor: 'pointer',
-                    letterSpacing: '0.06em', textAlign: 'center',
-                  }}>
-                    COUNTING CAMERA
-                  </button>
-                </div>
               )}
 
-              <ScaleCapture
-                scaleConnected={scaleConnected}
-                scaleWeight={scaleWeight}
-                capturedWeight={capturedWeight}
-                onWeightCapture={(weight, source) => {
-                  if (weight == null) {
-                    setCapturedWeight(null)
-                    setCounts(prev => ({ ...prev, _packWeight: 0, _scaleSource: null }))
-                  } else {
-                    setCapturedWeight({ weight, _source: source })
-                    setCounts(prev => ({ ...prev, _packWeight: weight, _scaleSource: source }))
-                  }
-                }}
-              />
-
-              <CountEntry
-                counts={counts} setCounts={setCounts}
-                detailed={detailedCounts}
-                onToggleDetailed={() => setDetailedCounts(!detailedCounts)}
-                sampleMethod={sampleMethod}
-                onToggleMethod={() => setSampleMethod(prev => prev === 'fullcount' ? '600g' : prev === '600g' ? 'manual' : 'fullcount')}
-                onSetMethod={setSampleMethod}
-                gradingStandard={gradingStandard}
-                onToggleStandard={() => setGradingStandard(prev => prev === 'mbg' ? 'butterfly' : 'mbg')}
-                onShowGradingGuide={() => setShowGradingGuide(true)}
-              />
+              {/* COUNT ENTRY — The main event */}
+              <div style={{ padding: '12px 16px' }}>
+                <CountEntry
+                  counts={counts} setCounts={setCounts}
+                  detailed={detailedCounts}
+                  onToggleDetailed={() => setDetailedCounts(!detailedCounts)}
+                  sampleMethod={sampleMethod}
+                  onToggleMethod={() => setSampleMethod(prev => prev === 'fullcount' ? 'pint' : prev === 'pint' ? '600g' : prev === '600g' ? 'manual' : 'fullcount')}
+                  onSetMethod={setSampleMethod}
+                  gradingStandard={gradingStandard}
+                  onToggleStandard={() => setGradingStandard(prev => prev === 'mbg' ? 'butterfly' : 'mbg')}
+                  onShowGradingGuide={() => setShowGradingGuide(true)}
+                />
+              </div>
 
               {/* Action buttons */}
-              <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ display: 'flex', gap: 8, padding: '0 16px 12px' }}>
                 <button onClick={() => {
                   setCounts({ good: 0, permanent: 0, condition: 0, decay: 0 })
                   setCapturedWeight(null)
@@ -925,9 +906,7 @@ function Dashboard() {
                   fontFamily: FONT, fontSize: 11, fontWeight: 600,
                   letterSpacing: '0.06em', textTransform: 'uppercase',
                   padding: 14, borderRadius: 4, cursor: 'pointer',
-                }}>
-                  DISCARD
-                </button>
+                }}>DISCARD</button>
                 <button onClick={logSample} style={{
                   flex: 2, background: COLORS.greenDim,
                   border: `2px solid ${COLORS.green}`, color: COLORS.green,
@@ -947,176 +926,291 @@ function Dashboard() {
                   fontFamily: FONT, fontSize: 11, fontWeight: 600,
                   letterSpacing: '0.06em', textTransform: 'uppercase',
                   padding: 14, borderRadius: 4, cursor: 'pointer',
-                }}>
-                  EXTRA
-                </button>
+                }}>EXTRA</button>
               </div>
+
               {/* Static reminder */}
               <div style={{
                 fontFamily: FONT, fontSize: 10, color: COLORS.text3,
-                textAlign: 'center', fontStyle: 'italic',
+                textAlign: 'center', fontStyle: 'italic', padding: '0 16px 10px',
               }}>
                 Discard sampled berries into trash lugs — do not return to production
               </div>
 
-              {/* Inline line stats — appears after middle layer, persists until filled or pallet closed */}
-              {showLineStats && !palletLineStats && (
+            </div>
+
+            {/* Line stats — below sample box, in center column */}
+            {showLineStats && !palletLineStats && (
+              <div style={{
+                marginTop: 12,
+                background: COLORS.amberDim, border: `2px solid ${COLORS.amber}`,
+                borderRadius: 6, padding: 14,
+              }}>
                 <div style={{
-                  background: COLORS.amberDim, border: `2px solid ${COLORS.amber}`,
-                  borderRadius: 6, padding: 14,
-                }}>
-                  <div style={{
-                    fontFamily: FONT, fontSize: 11, fontWeight: 700,
-                    color: COLORS.amber, marginBottom: 4,
-                    letterSpacing: '0.06em', textTransform: 'uppercase',
-                  }}>
-                    Line Stats — Check Machine Now
+                  fontFamily: FONT, fontSize: 11, fontWeight: 700,
+                  color: COLORS.amber, marginBottom: 4,
+                  letterSpacing: '0.06em', textTransform: 'uppercase',
+                }}>Line Stats — Check Machine Now</div>
+                <div style={{
+                  fontFamily: FONT, fontSize: 10, color: COLORS.text2,
+                  marginBottom: 10,
+                }}>Walk to the 360 and record current stats. You can defer this but it will keep showing until entered.</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 10 }}>
+                  <div>
+                    <div style={{ fontFamily: FONT, fontSize: 8, color: COLORS.amber, letterSpacing: '0.06em', marginBottom: 3 }}>LBS/HR</div>
+                    <input type="number" min="0" id="ls-rate" placeholder="0" style={{
+                      fontFamily: FONT, fontSize: 16, fontWeight: 700, textAlign: 'center',
+                      width: '100%', padding: '8px', borderRadius: 4, border: `1px solid ${COLORS.amber}`,
+                      background: COLORS.bg, color: COLORS.text, outline: 'none', boxSizing: 'border-box',
+                    }} />
                   </div>
-                  <div style={{
-                    fontFamily: FONT, fontSize: 10, color: COLORS.text2,
-                    marginBottom: 10,
-                  }}>
-                    Walk to the 360 and record current stats. You can defer this but it will keep showing until entered.
+                  <div>
+                    <div style={{ fontFamily: FONT, fontSize: 8, color: COLORS.amber, letterSpacing: '0.06em', marginBottom: 3 }}>BLOWOFF %</div>
+                    <input type="number" min="0" max="100" step="0.1" id="ls-blowoff" placeholder="0" style={{
+                      fontFamily: FONT, fontSize: 16, fontWeight: 700, textAlign: 'center',
+                      width: '100%', padding: '8px', borderRadius: 4, border: `1px solid ${COLORS.amber}`,
+                      background: COLORS.bg, color: COLORS.text, outline: 'none', boxSizing: 'border-box',
+                    }} />
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 10 }}>
-                    <div>
-                      <div style={{ fontFamily: FONT, fontSize: 8, color: COLORS.amber, letterSpacing: '0.06em', marginBottom: 3 }}>LBS/HR</div>
-                      <input type="number" min="0" id="ls-rate" placeholder="0" style={{
-                        fontFamily: FONT, fontSize: 16, fontWeight: 700, textAlign: 'center',
-                        width: '100%', padding: '8px', borderRadius: 4, border: `1px solid ${COLORS.amber}`,
-                        background: COLORS.bg, color: COLORS.text, outline: 'none', boxSizing: 'border-box',
-                      }} />
-                    </div>
-                    <div>
-                      <div style={{ fontFamily: FONT, fontSize: 8, color: COLORS.amber, letterSpacing: '0.06em', marginBottom: 3 }}>BLOWOFF %</div>
-                      <input type="number" min="0" max="100" step="0.1" id="ls-blowoff" placeholder="0" style={{
-                        fontFamily: FONT, fontSize: 16, fontWeight: 700, textAlign: 'center',
-                        width: '100%', padding: '8px', borderRadius: 4, border: `1px solid ${COLORS.amber}`,
-                        background: COLORS.bg, color: COLORS.text, outline: 'none', boxSizing: 'border-box',
-                      }} />
-                    </div>
-                    <div>
-                      <div style={{ fontFamily: FONT, fontSize: 8, color: COLORS.amber, letterSpacing: '0.06em', marginBottom: 3 }}>SIZE SORT %</div>
-                      <input type="number" min="0" max="100" step="0.1" id="ls-size" placeholder="0" style={{
-                        fontFamily: FONT, fontSize: 16, fontWeight: 700, textAlign: 'center',
-                        width: '100%', padding: '8px', borderRadius: 4, border: `1px solid ${COLORS.amber}`,
-                        background: COLORS.bg, color: COLORS.text, outline: 'none', boxSizing: 'border-box',
-                      }} />
-                    </div>
+                  <div>
+                    <div style={{ fontFamily: FONT, fontSize: 8, color: COLORS.amber, letterSpacing: '0.06em', marginBottom: 3 }}>SIZE SORT %</div>
+                    <input type="number" min="0" max="100" step="0.1" id="ls-size" placeholder="0" style={{
+                      fontFamily: FONT, fontSize: 16, fontWeight: 700, textAlign: 'center',
+                      width: '100%', padding: '8px', borderRadius: 4, border: `1px solid ${COLORS.amber}`,
+                      background: COLORS.bg, color: COLORS.text, outline: 'none', boxSizing: 'border-box',
+                    }} />
                   </div>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <button onClick={() => {
-                      const rate = parseFloat(document.getElementById('ls-rate')?.value) || null
-                      const blow = parseFloat(document.getElementById('ls-blowoff')?.value) || null
-                      const size = parseFloat(document.getElementById('ls-size')?.value) || null
-                      if (!rate && !blow && !size) return
-                      const stats = { lineRate: rate, blowoff: blow, sizeDiversion: size, capturedAt: showLineStats }
-                      setPalletLineStats(stats)
-                      // Attach to middle sample
-                      setHistory(prev => {
-                        const updated = [...prev]
-                        for (let i = updated.length - 1; i >= 0; i--) {
-                          if (updated[i].lotId === lotId && updated[i].sampleNum === 2 && !updated[i].isExtra) {
-                            updated[i] = { ...updated[i], lineStats: stats }
-                            break
-                          }
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={() => {
+                    const rate = parseFloat(document.getElementById('ls-rate')?.value) || null
+                    const blow = parseFloat(document.getElementById('ls-blowoff')?.value) || null
+                    const size = parseFloat(document.getElementById('ls-size')?.value) || null
+                    if (!rate && !blow && !size) return
+                    const stats = { lineRate: rate, blowoff: blow, sizeDiversion: size, capturedAt: showLineStats }
+                    setPalletLineStats(stats)
+                    setHistory(prev => {
+                      const updated = [...prev]
+                      for (let i = updated.length - 1; i >= 0; i--) {
+                        if (updated[i].lotId === lotId && updated[i].sampleNum === 2 && !updated[i].isExtra) {
+                          updated[i] = { ...updated[i], lineStats: stats }
+                          break
                         }
-                        localStorage.setItem('bc_history', JSON.stringify(updated))
-                        serverSave('bc_history', updated)
-                        return updated
-                      })
-                      setShowLineStats(null)
-                    }} style={{
-                      flex: 2, fontFamily: FONT, fontSize: 12, fontWeight: 700,
-                      color: COLORS.amber, background: COLORS.bg,
-                      border: `2px solid ${COLORS.amber}`,
-                      padding: 10, borderRadius: 4, cursor: 'pointer',
-                      letterSpacing: '0.06em',
-                    }}>
-                      SAVE LINE STATS
-                    </button>
-                    <button onClick={() => {/* just leave it showing */}} style={{
-                      flex: 1, fontFamily: FONT, fontSize: 10,
-                      color: COLORS.text3, background: 'transparent',
-                      border: `1px solid ${COLORS.border}`,
-                      padding: 10, borderRadius: 4, cursor: 'pointer',
-                    }}>
-                      LATER
-                    </button>
-                  </div>
+                      }
+                      localStorage.setItem('bc_history', JSON.stringify(updated))
+                      serverSave('bc_history', updated)
+                      return updated
+                    })
+                    setShowLineStats(null)
+                  }} style={{
+                    flex: 2, fontFamily: FONT, fontSize: 12, fontWeight: 700,
+                    color: COLORS.amber, background: COLORS.bg,
+                    border: `2px solid ${COLORS.amber}`,
+                    padding: 10, borderRadius: 4, cursor: 'pointer',
+                    letterSpacing: '0.06em',
+                  }}>SAVE LINE STATS</button>
+                  <button onClick={() => {}} style={{
+                    flex: 1, fontFamily: FONT, fontSize: 10,
+                    color: COLORS.text3, background: 'transparent',
+                    border: `1px solid ${COLORS.border}`,
+                    padding: 10, borderRadius: 4, cursor: 'pointer',
+                  }}>LATER</button>
                 </div>
-              )}
-
-              {/* Line stats confirmed — show as pallet metric */}
-              {palletLineStats && (
-                <div style={{
-                  background: COLORS.greenDim, border: `1px solid ${COLORS.green}`,
-                  borderRadius: 6, padding: '10px 14px',
-                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                }}>
-                  <div style={{ display: 'flex', gap: 14, fontFamily: FONT, fontSize: 11 }}>
-                    {palletLineStats.lineRate && <span><span style={{ color: COLORS.text3 }}>Lbs/Hr</span> <b style={{ color: COLORS.green }}>{palletLineStats.lineRate}</b></span>}
-                    {palletLineStats.blowoff != null && <span><span style={{ color: COLORS.text3 }}>Blowoff</span> <b style={{ color: COLORS.green }}>{palletLineStats.blowoff}%</b></span>}
-                    {palletLineStats.sizeDiversion != null && <span><span style={{ color: COLORS.text3 }}>Size Sort</span> <b style={{ color: COLORS.green }}>{palletLineStats.sizeDiversion}%</b></span>}
-                  </div>
-                  <span style={{ fontFamily: FONT, fontSize: 9, color: COLORS.green, fontStyle: 'italic' }}>
-                    {palletLineStats.capturedAt}
-                  </span>
-                </div>
-              )}
-            </div>
-
-            {/* RIGHT — Threshold detail + lot summary */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                <ShareButton label="Share QC Data" getSnapshot={() => {
-                  const gradeResult = gradeSample(counts, GRADING_STANDARDS[gradingStandard].tolerances)
-                  const lotSamples = history.filter(s => s.lotId === lotId)
-                  const official = lotSamples.filter(s => !s.isExtra && !s.isSkipped)
-                  const packLog = JSON.parse(localStorage.getItem('bc_packlog') || '[]')
-                  const today = new Date().toLocaleDateString()
-                  const todayLog = packLog.filter(e => e.date === today)
-                  return {
-                    type: 'grade',
-                    lotId, dailyPalletNum, receiptNum, grower, variety, packCriteria,
-                    grade: gradeResult,
-                    views: {
-                      grade: { grade: gradeResult },
-                      lotSummary: {
-                        lotSummary: {
-                          lotId,
-                          sampleCount: official.length,
-                          grade: official.length > 0 ? gradeSample(averageCounts(official), GRADING_STANDARDS[gradingStandard].tolerances) : null,
-                          pctCombined: official.length > 0 ? gradeSample(averageCounts(official), GRADING_STANDARDS[gradingStandard].tolerances).pctCombined : 0,
-                          samples: [1,2,3].map(n => {
-                            const s = lotSamples.find(x => x.sampleNum === n)
-                            if (!s) return { layer: ['BTM','MID','TOP'][n-1], isSkipped: true }
-                            if (s.isSkipped) return { layer: ['BTM','MID','TOP'][n-1], isSkipped: true }
-                            return { layer: ['BTM','MID','TOP'][n-1], grade: gradeSample(s, GRADING_STANDARDS[gradingStandard].tolerances).label }
-                          }),
-                        },
-                      },
-                      packLog: {
-                        packLog: {
-                          entries: todayLog,
-                          totalBoxes: todayLog.reduce((s, e) => s + (e.boxes || 0), 0),
-                          palletCount: new Set(todayLog.filter(e => !e.isMissed).map(e => e.dailyPallet)).size,
-                        },
-                      },
-                    },
-                  }
-                }} />
               </div>
-              <ThresholdBars counts={counts} tolerances={GRADING_STANDARDS[gradingStandard].tolerances} />
-              <LotSummary lotId={lotId} history={history} />
+            )}
+            {palletLineStats && (
+              <div style={{
+                marginTop: 12,
+                background: COLORS.greenDim, border: `1px solid ${COLORS.green}`,
+                borderRadius: 6, padding: '10px 14px',
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              }}>
+                <div style={{ display: 'flex', gap: 14, fontFamily: FONT, fontSize: 11 }}>
+                  {palletLineStats.lineRate && <span><span style={{ color: COLORS.text3 }}>Lbs/Hr</span> <b style={{ color: COLORS.green }}>{palletLineStats.lineRate}</b></span>}
+                  {palletLineStats.blowoff != null && <span><span style={{ color: COLORS.text3 }}>Blowoff</span> <b style={{ color: COLORS.green }}>{palletLineStats.blowoff}%</b></span>}
+                  {palletLineStats.sizeDiversion != null && <span><span style={{ color: COLORS.text3 }}>Size Sort</span> <b style={{ color: COLORS.green }}>{palletLineStats.sizeDiversion}%</b></span>}
+                </div>
+                <span style={{ fontFamily: FONT, fontSize: 9, color: COLORS.green, fontStyle: 'italic' }}>
+                  {palletLineStats.capturedAt}
+                </span>
+              </div>
+            )}
+
+            {/* Weather & Pre-pack context — subtle, below sample box */}
+            <div style={{ marginTop: 8 }}>
+              <WeatherBanner />
             </div>
+            {receiptNum && (
+              <div style={{ marginTop: 4 }}>
+                <PrePackBanner receiptNum={receiptNum} />
+              </div>
+            )}
           </div>
 
-          {/* Sample log — full width running dashboard */}
-          <div style={{ padding: '0 32px 20px' }}>
+          {/* ===== RESULTS — populate below as samples are logged ===== */}
+          <div style={{
+            maxWidth: 800, margin: '24px auto 0', padding: '0 20px 20px',
+            display: 'flex', flexDirection: 'column', gap: 16,
+          }}>
+            {/* Pallet management — accessible but secondary */}
+            <details style={{ borderBottom: `1px solid ${COLORS.border}` }}>
+              <summary style={{
+                fontFamily: FONT, fontSize: 9, fontWeight: 600, color: COLORS.text3,
+                letterSpacing: '0.08em', textTransform: 'uppercase',
+                padding: '6px 0', cursor: 'pointer',
+                listStyle: 'none', display: 'flex', alignItems: 'center', gap: 8,
+              }}>
+                <span style={{ fontSize: 8 }}>&#9654;</span> PALLET / PACK
+                {receiptNum && <span style={{ color: COLORS.green, fontWeight: 400, textTransform: 'none', letterSpacing: '0.02em' }}>{'\u2014'} {receiptNum} {grower}</span>}
+              </summary>
+
+              <PalletBuilder
+                palletReceipts={palletReceipts}
+                onAddReceipt={addReceiptToPallet}
+                onUpdateBoxes={updateReceiptBoxes}
+                onRemoveReceipt={removeReceiptFromPallet}
+                onSelectReceipt={selectReceiptForQC}
+                packCode={packCode} setPackCode={setPackCode}
+                currentReceiptNum={receiptNum}
+              />
+
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                padding: '6px 0',
+                borderBottom: `1px solid ${COLORS.border}`,
+              }}>
+                {features.receipts !== false && (
+                  <button onClick={() => setShowReceipts(true)} style={{
+                    fontFamily: FONT, fontSize: 9, color: COLORS.amber,
+                    background: 'transparent', border: `1px solid ${COLORS.amberDim}`,
+                    padding: '3px 10px', borderRadius: 3, cursor: 'pointer',
+                    letterSpacing: '0.06em',
+                  }}>RECEIPTS</button>
+                )}
+                <button onClick={() => setShowPackCodes(true)} style={{
+                  fontFamily: FONT, fontSize: 9, color: COLORS.text3,
+                  background: 'transparent', border: `1px solid ${COLORS.border}`,
+                  padding: '3px 10px', borderRadius: 3, cursor: 'pointer',
+                  letterSpacing: '0.06em',
+                }}>PACK CODES</button>
+                <button onClick={() => setShowPrePack(true)} style={{
+                  fontFamily: FONT, fontSize: 9, color: COLORS.green,
+                  background: 'transparent', border: `1px solid ${COLORS.greenDim}`,
+                  padding: '3px 10px', borderRadius: 3, cursor: 'pointer',
+                  letterSpacing: '0.06em',
+                }}>PRE-PACK</button>
+              </div>
+
+              {features.packPlan !== false && (
+                <div style={{ padding: '6px 0' }}>
+                  <PackPlan packLog={(() => {
+                    try { return JSON.parse(localStorage.getItem('bc_packlog') || '[]') } catch { return [] }
+                  })()} />
+                </div>
+              )}
+
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 12,
+                padding: '6px 0', borderBottom: `1px solid ${COLORS.border}`,
+              }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    {Object.entries(PACK_CRITERIA).map(([key, pc]) => (
+                      <button key={key} onClick={() => setPackCriteria(key)}
+                        title={pc.description}
+                        style={{
+                          fontFamily: FONT, fontSize: 10, fontWeight: 600,
+                          color: packCriteria === key ? COLORS.green : COLORS.text3,
+                          background: packCriteria === key ? COLORS.greenDim : 'transparent',
+                          border: `1px solid ${packCriteria === key ? COLORS.green : COLORS.border}`,
+                          padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
+                        }}>
+                        {pc.label}
+                      </button>
+                    ))}
+                  </div>
+                  {PACK_CRITERIA[packCriteria]?.spec && (
+                    <div style={{ fontFamily: FONT, fontSize: 9, color: COLORS.green, letterSpacing: '0.02em' }}>
+                      {PACK_CRITERIA[packCriteria].spec}
+                    </div>
+                  )}
+                </div>
+                <div style={{ flex: 1 }} />
+                {(() => {
+                  const officialCount = lotId ? history.filter(s => s.lotId === lotId && !s.isExtra).length : 0
+                  const layerNames = { 0: '#1 BOTTOM', 1: '#2 MIDDLE', 2: '#3 TOP' }
+                  return (
+                    <div style={{ fontFamily: FONT, fontSize: 11, display: 'flex', alignItems: 'center', gap: 8 }}>
+                      {officialCount < 3 ? (
+                        <span style={{ color: COLORS.green, fontWeight: 600 }}>NEXT: {layerNames[officialCount] || 'SAMPLE'}</span>
+                      ) : (
+                        <span style={{ color: COLORS.amber, fontWeight: 600 }}>3/3 DONE</span>
+                      )}
+                      {officialCount < 3 && (
+                        <>
+                          <button onClick={skipLayer} style={{
+                            fontFamily: FONT, fontSize: 9, color: COLORS.text3,
+                            background: 'transparent', border: `1px solid ${COLORS.border}`,
+                            padding: '3px 8px', borderRadius: 3, cursor: 'pointer',
+                          }}>SKIP LAYER</button>
+                          <button onClick={skipPallet} style={{
+                            fontFamily: FONT, fontSize: 9, color: COLORS.red,
+                            background: 'transparent', border: `1px solid ${COLORS.redDim}`,
+                            padding: '3px 8px', borderRadius: 3, cursor: 'pointer',
+                          }}>MISS PALLET</button>
+                        </>
+                      )}
+                    </div>
+                  )
+                })()}
+              </div>
+            </details>
+
+            <ThresholdBars counts={counts} tolerances={GRADING_STANDARDS[gradingStandard].tolerances} />
+            <LotSummary lotId={lotId} history={history} />
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <ShareButton label="Share QC Data" getSnapshot={() => {
+                const gradeResult = gradeSample(counts, GRADING_STANDARDS[gradingStandard].tolerances)
+                const lotSamples = history.filter(s => s.lotId === lotId)
+                const official = lotSamples.filter(s => !s.isExtra && !s.isSkipped)
+                const packLog = JSON.parse(localStorage.getItem('bc_packlog') || '[]')
+                const today = new Date().toLocaleDateString()
+                const todayLog = packLog.filter(e => e.date === today)
+                return {
+                  type: 'grade',
+                  lotId, dailyPalletNum, packLine, receiptNum, grower, variety, packCriteria,
+                  grade: gradeResult,
+                  views: {
+                    grade: { grade: gradeResult },
+                    lotSummary: {
+                      lotSummary: {
+                        lotId,
+                        sampleCount: official.length,
+                        grade: official.length > 0 ? gradeSample(averageCounts(official), GRADING_STANDARDS[gradingStandard].tolerances) : null,
+                        pctCombined: official.length > 0 ? gradeSample(averageCounts(official), GRADING_STANDARDS[gradingStandard].tolerances).pctCombined : 0,
+                        samples: [1,2,3].map(n => {
+                          const s = lotSamples.find(x => x.sampleNum === n)
+                          if (!s) return { layer: ['BTM','MID','TOP'][n-1], isSkipped: true }
+                          if (s.isSkipped) return { layer: ['BTM','MID','TOP'][n-1], isSkipped: true }
+                          return { layer: ['BTM','MID','TOP'][n-1], grade: gradeSample(s, GRADING_STANDARDS[gradingStandard].tolerances).label }
+                        }),
+                      },
+                    },
+                    packLog: {
+                      packLog: {
+                        entries: todayLog,
+                        totalBoxes: todayLog.reduce((s, e) => s + (e.boxes || 0), 0),
+                        palletCount: new Set(todayLog.filter(e => !e.isMissed).map(e => e.dailyPallet)).size,
+                      },
+                    },
+                  },
+                }
+              }} />
+            </div>
             <SampleHistory history={history} onClear={clearHistory} />
           </div>
         </div>
+
       ) : (
         /* ========== OPS MODE ========== */
         <div style={{

@@ -132,5 +132,6 @@ export const ALL_KEYS = [
   'bc_prepack', 'bc_dc_results', 'bc_features', 'bc_packcodes_db',
   'bc_packcodes_favorites', 'bc_zones', 'bc_accuracy', 'bc_training',
   'bc_dc_strictness', 'bc_target_score', 'bc_dc_log',
-  'bc_compliance_config', 'bc_compliance_done', 'bc_qc_simple_view',
+  'bc_compliance_config', 'bc_compliance_done', 'bc_compliance_captures',
+  'bc_fert_template', 'bc_qc_simple_view',
 ]

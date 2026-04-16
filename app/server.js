@@ -15,6 +15,7 @@ import { createProxyMiddleware } from 'http-proxy-middleware'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import { existsSync } from 'fs'
+import { spawn } from 'child_process'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -55,7 +56,7 @@ wss.on('connection', (ws, req) => {
       }
 
       // Grader → dashboard: frames, status, sample data
-      if (role === 'grader' && (msg.type === 'grader_frame' || msg.type === 'grader_status' || msg.type === 'sample')) {
+      if (role === 'grader' && (msg.type === 'grader_frame' || msg.type === 'grader_status' || msg.type === 'sample' || msg.type === 'training_capture')) {
         broadcast(msg, 'dashboard')
       }
 
@@ -116,7 +117,7 @@ app.get('/api/ip', (req, res) => {
 })
 
 // --- Shared storage (replaces localStorage — all devices share one store) ---
-import { readFileSync, writeFileSync, mkdirSync } from 'fs'
+import { readFileSync, writeFileSync, mkdirSync, readdirSync } from 'fs'
 
 const DATA_DIR = join(__dirname, 'data')
 try { mkdirSync(DATA_DIR, { recursive: true }) } catch {}
@@ -216,6 +217,103 @@ app.get('/api/daily/:date', (req, res) => {
 app.get('/api/daily', (req, res) => {
   const dates = [...dailySummaries.keys()].sort().reverse()
   res.json(dates)
+})
+
+// --- Training data management ---
+const mlDatasetDir = join(__dirname, 'ml', 'dataset')
+
+app.get('/api/training-count', (req, res) => {
+  try {
+    const trainDir = join(mlDatasetDir, 'images', 'train')
+    const files = readdirSync(trainDir).filter(f => f.endsWith('.jpg'))
+    res.json({ count: files.length })
+  } catch {
+    res.json({ count: 0 })
+  }
+})
+
+app.post('/api/training-data', express.json({ limit: '10mb' }), (req, res) => {
+  const { image, labels, width, height } = req.body
+  if (!image || !labels) return res.status(400).json({ error: 'Missing image or labels' })
+
+  const trainImgDir = join(mlDatasetDir, 'images', 'train')
+  const trainLblDir = join(mlDatasetDir, 'labels', 'train')
+  mkdirSync(trainImgDir, { recursive: true })
+  mkdirSync(trainLblDir, { recursive: true })
+
+  // Find next index
+  let idx = 0
+  try {
+    const existing = readdirSync(trainImgDir).filter(f => f.endsWith('.jpg'))
+    const nums = existing.map(f => parseInt(f)).filter(n => !isNaN(n))
+    if (nums.length > 0) idx = Math.max(...nums) + 1
+  } catch {}
+  const name = String(idx).padStart(4, '0')
+
+  // Save image
+  const imgBuf = Buffer.from(image, 'base64')
+  writeFileSync(join(trainImgDir, `${name}.jpg`), imgBuf)
+
+  // Convert labels to YOLO format (class cx cy w h — normalized)
+  const yoloLines = labels.map(({ x, y, r }) => {
+    const cx = Math.max(0, Math.min(1, x / width))
+    const cy = Math.max(0, Math.min(1, y / height))
+    const bw = Math.max(0, Math.min(1, (2 * r) / width))
+    const bh = Math.max(0, Math.min(1, (2 * r) / height))
+    return `0 ${cx.toFixed(6)} ${cy.toFixed(6)} ${bw.toFixed(6)} ${bh.toFixed(6)}`
+  }).join('\n')
+  writeFileSync(join(trainLblDir, `${name}.txt`), yoloLines)
+
+  const total = readdirSync(trainImgDir).filter(f => f.endsWith('.jpg')).length
+  console.log(`[training] Saved ${name}.jpg with ${labels.length} labels (${total} total)`)
+  res.json({ ok: true, idx, count: total })
+})
+
+app.post('/api/start-training', (req, res) => {
+  const trainScript = join(__dirname, 'ml', 'train.py')
+  if (!existsSync(trainScript)) return res.status(404).json({ error: 'train.py not found' })
+
+  const trainProc = spawn('python', ['-u', trainScript], {
+    cwd: join(__dirname, 'ml'),
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  trainProc.stdout.on('data', d => process.stdout.write('[train] ' + d))
+  trainProc.stderr.on('data', d => process.stderr.write('[train] ' + d))
+  trainProc.on('close', code => console.log(`[train] Finished (code ${code})`))
+
+  console.log(`[train] Started training (PID ${trainProc.pid})`)
+  res.json({ ok: true, pid: trainProc.pid })
+})
+
+// --- Camera service management ---
+let cameraProc = null
+
+app.post('/api/restart-camera', (req, res) => {
+  // Kill existing camera process if running
+  if (cameraProc) {
+    try { cameraProc.kill() } catch {}
+    cameraProc = null
+  }
+
+  const scriptPath = join(__dirname, 'camera_service.py')
+  if (!existsSync(scriptPath)) {
+    return res.status(404).json({ error: 'camera_service.py not found' })
+  }
+
+  cameraProc = spawn('python', ['-u', scriptPath], {
+    cwd: __dirname,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+
+  cameraProc.stdout.on('data', (d) => process.stdout.write('[camera] ' + d))
+  cameraProc.stderr.on('data', (d) => process.stderr.write('[camera] ' + d))
+  cameraProc.on('close', (code) => {
+    console.log(`[camera] Process exited (code ${code})`)
+    cameraProc = null
+  })
+
+  console.log(`[camera] Started camera_service.py (PID ${cameraProc.pid})`)
+  res.json({ ok: true, pid: cameraProc.pid })
 })
 
 // --- HTTP serving ---
