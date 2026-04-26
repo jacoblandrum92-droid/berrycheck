@@ -1928,7 +1928,16 @@ function Dashboard() {
 
       {/* QCer Mode wizard — full-screen takeover when enabled. State hooks above
           continue to run, so toggling off restores the dashboard with no data loss. */}
-      {qcerMode && <QCerWizard onExit={toggleQcerMode} />}
+      {qcerMode && (
+        <QCerWizard
+          dailyPalletNum={dailyPalletNum} setDailyPalletNum={setDailyPalletNum}
+          lotId={lotId} setLotId={setLotId}
+          packCode={packCode} setPackCode={setPackCode}
+          packCodeDB={packCodeDB} packFavorites={packFavorites}
+          dualLineMode={dualLineMode} activeLine={activeLine} switchLine={switchLine}
+          onExit={toggleQcerMode}
+        />
+      )}
 
     </div>
   )
