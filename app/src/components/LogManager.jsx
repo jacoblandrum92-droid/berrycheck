@@ -109,24 +109,85 @@ export default function LogManager({ history, onUpdateHistory, onClose }) {
                 [...filtered].reverse().map(s => {
                   const isEditing = editingId === s.id
                   const data = isEditing ? editData : s
-                  const result = gradeSample(data)
-                  const color = GRADE_TEXT[result.status] || COLORS.text3
+                  const isBoxWeight = s._sampleMethod === 'boxweight' || (Array.isArray(s._boxWeights) && s._boxWeights.length > 0)
+                  const result = isBoxWeight ? null : gradeSample(data)
+                  const color = result ? (GRADE_TEXT[result.status] || COLORS.text3) : COLORS.text3
 
-                  const typeLabel = s.isSkipped ? 'SKIP' : s.isExtra ? 'EXTRA'
+                  const typeLabel = s.isSkipped ? 'SKIP'
+                    : isBoxWeight ? 'BOX'
+                    : s.isExtra ? 'EXTRA'
                     : s.sampleNum ? `#${s.sampleNum}` : 'SOP'
                   const typeColor = s.isSkipped ? COLORS.text3
-                    : s.isExtra ? COLORS.purple : COLORS.green
+                    : isBoxWeight ? COLORS.amber
+                    : s.isExtra ? COLORS.purple
+                    : COLORS.green
+
+                  // Box-weight sample summary
+                  let boxSummary = null
+                  if (isBoxWeight) {
+                    const weights = s._boxWeights || []
+                    const label = s._boxLabelWeight || 0
+                    const tol = s._boxTolerance || 0
+                    const lower = label - (label * tol / 100)
+                    const upper = label + (label * tol / 100)
+                    const inSpec = weights.filter(w => w >= lower && w <= upper).length
+                    const mean = weights.length > 0 ? weights.reduce((a, b) => a + b, 0) / weights.length : 0
+                    const min = weights.length > 0 ? Math.min(...weights) : 0
+                    const max = weights.length > 0 ? Math.max(...weights) : 0
+                    boxSummary = { weights, label, tol, inSpec, mean, min, max, count: weights.length, lower, upper }
+                  }
 
                   return (
                     <tr key={s.id} style={{
                       borderBottom: `1px solid ${COLORS.border}`,
-                      background: isEditing ? COLORS.bg3 : 'transparent',
-                      opacity: s.isSkipped ? 0.4 : s.isExtra ? 0.7 : 1,
+                      background: isEditing ? COLORS.bg3 : (isBoxWeight ? COLORS.amber + '08' : 'transparent'),
+                      opacity: s.isSkipped ? 0.4 : (s.isExtra && !isBoxWeight) ? 0.7 : 1,
                     }}>
                       <td style={tdStyle}>{s.date}</td>
                       <td style={tdStyle}>{s.time}</td>
                       <td style={{ ...tdStyle, color: typeColor, fontWeight: 600 }}>{typeLabel}</td>
-                      {isEditing ? (
+                      {isBoxWeight ? (
+                        <>
+                          <td style={{ ...tdStyle, color: COLORS.text }}>{s.lotId || '—'}</td>
+                          <td style={tdStyle}>{s.receiptNum || '—'}</td>
+                          <td style={tdStyle}>{s.grower || '—'}</td>
+                          <td style={tdStyle}>{s.variety || '—'}</td>
+                          <td colSpan={6} style={{ ...tdStyle, color: COLORS.text }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                              <div style={{ fontFamily: FONT, fontSize: 10, fontWeight: 600, letterSpacing: '0.04em' }}>
+                                <span style={{ color: COLORS.amber }}>{boxSummary.count}</span>
+                                <span style={{ color: COLORS.text3 }}> boxes · </span>
+                                <span style={{ color: boxSummary.inSpec === boxSummary.count ? COLORS.green : COLORS.amber }}>
+                                  {boxSummary.inSpec}/{boxSummary.count} in spec
+                                </span>
+                                <span style={{ color: COLORS.text3 }}> · target </span>
+                                <span style={{ color: COLORS.text }}>{boxSummary.label}g ±{boxSummary.tol}%</span>
+                                <span style={{ color: COLORS.text3 }}> · avg </span>
+                                <span style={{ color: COLORS.text, fontWeight: 700 }}>{boxSummary.mean.toFixed(1)}g</span>
+                                <span style={{ color: COLORS.text3 }}> · range </span>
+                                <span style={{ color: COLORS.text }}>{boxSummary.min.toFixed(1)}–{boxSummary.max.toFixed(1)}g</span>
+                              </div>
+                              <div style={{
+                                fontFamily: FONT, fontSize: 9, color: COLORS.text2,
+                                lineHeight: 1.5, wordBreak: 'break-word',
+                              }}>
+                                {boxSummary.weights.map((w, i) => {
+                                  const inSpec = w >= boxSummary.lower && w <= boxSummary.upper
+                                  return (
+                                    <span key={i} style={{
+                                      color: inSpec ? COLORS.text2 : COLORS.red,
+                                      fontWeight: inSpec ? 400 : 600,
+                                      marginRight: 8,
+                                    }}>
+                                      {w.toFixed(1)}{i < boxSummary.weights.length - 1 ? ',' : ''}
+                                    </span>
+                                  )
+                                })}
+                              </div>
+                            </div>
+                          </td>
+                        </>
+                      ) : isEditing ? (
                         <>
                           <td style={tdStyle}><input style={editInput} value={data.lotId || ''} onChange={e => updateField('lotId', e.target.value)} /></td>
                           <td style={tdStyle}><input style={editInput} value={data.receiptNum || ''} onChange={e => updateField('receiptNum', e.target.value)} /></td>
@@ -138,6 +199,13 @@ export default function LogManager({ history, onUpdateHistory, onClose }) {
                                 value={data[k] || ''} onChange={e => updateField(k, parseInt(e.target.value) || 0)} />
                             </td>
                           ))}
+                          <td style={{ ...tdStyle, fontWeight: 600, color }}>{result.pctCombined}%</td>
+                          <td style={tdStyle}>
+                            <span style={{
+                              fontFamily: FONT, fontSize: 10, fontWeight: 600,
+                              padding: '2px 7px', borderRadius: 2, color,
+                            }}>{result.label}</span>
+                          </td>
                         </>
                       ) : (
                         <>
@@ -149,15 +217,15 @@ export default function LogManager({ history, onUpdateHistory, onClose }) {
                           <td style={tdStyle}>{s.permanent || 0}</td>
                           <td style={tdStyle}>{s.condition || 0}</td>
                           <td style={{ ...tdStyle, color: (s.decay || 0) > 0 ? COLORS.red : COLORS.text2 }}>{s.decay || 0}</td>
+                          <td style={{ ...tdStyle, fontWeight: 600, color }}>{result.pctCombined}%</td>
+                          <td style={tdStyle}>
+                            <span style={{
+                              fontFamily: FONT, fontSize: 10, fontWeight: 600,
+                              padding: '2px 7px', borderRadius: 2, color,
+                            }}>{result.label}</span>
+                          </td>
                         </>
                       )}
-                      <td style={{ ...tdStyle, fontWeight: 600, color }}>{result.pctCombined}%</td>
-                      <td style={tdStyle}>
-                        <span style={{
-                          fontFamily: FONT, fontSize: 10, fontWeight: 600,
-                          padding: '2px 7px', borderRadius: 2, color,
-                        }}>{result.label}</span>
-                      </td>
                       <td style={tdStyle}>
                         <div style={{ display: 'flex', gap: 4 }}>
                           {isEditing ? (

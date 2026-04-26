@@ -11,6 +11,7 @@ const DEFAULT_CODES = [
   { code: 'NF8233', desc: 'GA 12-6 OZ PATRIOT', weight: 4.57, perPallet: 240, special: 'American Flag Label', palletType: 'brown' },
   { code: 'NF2102', desc: 'GA 4-2 LB BLUES', weight: 8.12, perPallet: 144, special: '', palletType: 'brown' },
   { code: 'NF740', desc: 'GA 12-1 PT BLUES', weight: 8.00, perPallet: 144, special: '', palletType: 'brown' },
+  { code: 'NF11607', desc: 'F&V 12-1 PT BLUES', weight: 8.00, perPallet: 144, special: '', palletType: 'brown' },
   { code: 'NF9843', desc: 'GA 12-1 PT BLUES PTI', weight: 8.00, perPallet: 144, special: 'PTI Label (Kroger)', palletType: 'brown' },
   { code: 'NF3850', desc: 'GA 12-1 PT, CC', weight: 8.00, perPallet: 144, special: 'Canada Only', palletType: 'brown' },
   { code: 'NF7704', desc: 'GA 12-1 PT, WM', weight: 8.00, perPallet: 144, special: 'Requires PTI - Walmart', palletType: 'brown' },
@@ -74,6 +75,16 @@ export function loadPackCodes() {
         const palletType = s.includes('CHEP') && !s.includes('NO CHEP') ? 'chep' : 'brown'
         return { ...c, palletType }
       })
+      // Auto-merge: add any new DEFAULT_CODES not present in saved list. Trade-off:
+      // a deleted default would come back — acceptable for solo-shed use, lets new
+      // defaults flow in without manual reset.
+      const existingCodes = new Set(migrated.map(c => c.code))
+      for (const def of DEFAULT_CODES) {
+        if (!existingCodes.has(def.code)) {
+          migrated.push(def)
+          needsSave = true
+        }
+      }
       if (needsSave) localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated))
       return migrated
     }
