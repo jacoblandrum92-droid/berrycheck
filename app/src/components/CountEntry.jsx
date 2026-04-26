@@ -63,18 +63,43 @@ const METHODS = {
     ],
   },
   pint: {
-    label: 'PINT CLAMSHELL',
-    brief: 'Weigh a pint clamshell, camera counts, system scales to 600g equivalent.',
-    verbose: 'Quick sampling method using a sealed pint clamshell from the line. Weigh the clamshell on the scale (tare for container weight), dump onto the roller tray, and let the camera count. Enter defects as found. The grade is calculated on actual percentages — same result as a 600g sample. The 600g equivalent projection is shown for MBG reporting compatibility.',
+    label: 'PINT',
+    brief: 'Pint clamshell — camera total or 30-berry weight.',
+    verbose: 'Sample a sealed pint clamshell from the line. Use the camera/grader for total count, OR pull 30 berries and weigh them — the system uses whichever you enter. Optional clamshell weight check for fill audit. Grading is on actual percentages.',
     color: '#10B981',
     steps: [
       'Pull a sealed pint clamshell from the packing line.',
-      'Place on the clamshell scale. Record net berry weight (after tare).',
-      'Dump contents onto the roller tray.',
-      'Camera counts total berries — verify and correct if needed.',
+      'Optional: weigh on clamshell scale (gross or net) for fill audit.',
+      'Either dump onto tray and use camera count, OR pull 30 berries and weigh them.',
       'Inspect every berry. Remove and sort all defects.',
-      'Record defect counts below.',
-      'System grades on actual percentages and shows 600g equivalent for reporting.',
+      'Record defect counts below. System grades against 302g pint label.',
+    ],
+  },
+  '18oz': {
+    label: '18OZ',
+    brief: '18oz clamshell — camera total or 30-berry weight.',
+    verbose: 'Sample a sealed 18oz clamshell from the line. Use the camera/grader for total count, OR pull 30 berries and weigh them — the system uses whichever you enter. Optional clamshell weight check for fill audit. Grading is on actual percentages against the 518g label.',
+    color: '#EA580C',
+    steps: [
+      'Pull a sealed 18oz clamshell from the packing line.',
+      'Optional: weigh on clamshell scale (gross or net) for fill audit.',
+      'Either dump onto tray and use camera count, OR pull 30 berries and weigh them.',
+      'Inspect every berry. Remove and sort all defects.',
+      'Record defect counts below. System grades against 518g 18oz label.',
+    ],
+  },
+  mightyblue: {
+    label: 'MIGHTY BLUE',
+    brief: '9.8oz Mighty Blue clamshell — camera total or 30-berry weight.',
+    verbose: 'Sample a sealed 9.8oz Mighty Blue clamshell from the line. Use the camera/grader for total count, OR pull 30 berries and weigh them — the system uses whichever you enter. Mighty Blue requires Good or Excellent grade and ≥19mm berry size (≥66g per 30 berries) — check via the 30-berry weight even if using camera count.',
+    color: '#0891B2',
+    steps: [
+      'Pull a sealed 9.8oz Mighty Blue clamshell from the packing line.',
+      'Optional: weigh on clamshell scale (gross or net) for fill audit.',
+      'Either dump onto tray and use camera count, OR pull 30 berries and weigh them.',
+      'For Mighty Blue: 30-berry weight is recommended (size verification ≥66g).',
+      'Inspect every berry. Remove and sort all defects.',
+      'Record defect counts below. System grades against 282g Mighty Blue label.',
     ],
   },
   pint30: {
@@ -124,15 +149,25 @@ const METHODS = {
   },
 }
 
-// Clamshell profiles — editable defaults (built-ins)
+// Clamshell profiles — editable defaults (built-ins). New per-pack-type keys
+// (pint, 18oz, mightyblue) are the new universal modes that accept either camera total
+// or 30-berry weight. Legacy 30-berry-only keys retained for history readability.
 const CLAMSHELL_PROFILES = {
-  pint30:  { labelWeight: 302, tare: 20, unitLabel: 'Pint' },
-  '18oz30': { labelWeight: 518, tare: 30, unitLabel: '18oz' },
+  pint:         { labelWeight: 302, tare: 20, unitLabel: 'Pint' },
+  '18oz':       { labelWeight: 518, tare: 30, unitLabel: '18oz' },
+  mightyblue:   { labelWeight: 282, tare: 20, unitLabel: 'Mighty Blue' },
+  // Legacy 30-berry-only modes (still resolvable for historical samples)
+  pint30:       { labelWeight: 302, tare: 20, unitLabel: 'Pint' },
+  '18oz30':     { labelWeight: 518, tare: 30, unitLabel: '18oz' },
   mightyblue30: { labelWeight: 282, tare: 20, unitLabel: 'Mighty Blue' },
 }
 
 // Built-in method keys in display order
-const BUILTIN_METHOD_ORDER = ['fullcount', 'pint', 'pint30', '18oz30', 'mightyblue30', '600g', 'manual']
+// Cycle order: per-pack-type camera modes first, then legacy 30-berry-only modes,
+// then 600g and manual. The QCer can pick any of them — camera modes use the grader,
+// 30-berry modes don't. Each pack type has both options for now; future cleanup can
+// fold them into one dual-input mode if Jacob confirms.
+const BUILTIN_METHOD_ORDER = ['fullcount', 'pint', '18oz', 'mightyblue', 'pint30', '18oz30', 'mightyblue30', '600g', 'manual']
 
 // localStorage keys for admin settings
 const LS_ENABLED = 'bc_enabled_methods'
@@ -377,11 +412,17 @@ export default function CountEntry({ counts, setCounts, detailed, onToggleDetail
 
   const isManual = sampleMethod === 'manual'
   const isFullCount = sampleMethod === 'fullcount'
+  // Per-pack-type modes — accept camera total OR 30-berry weight. isPint kept as alias
+  // for `sampleMethod === 'pint'` so existing pint-specific UI branches still apply when relevant.
   const isPint = sampleMethod === 'pint'
+  const is18oz = sampleMethod === '18oz'
+  const isMightyBlue = sampleMethod === 'mightyblue'
+  const isPackTypeMode = isPint || is18oz || isMightyBlue
+  // Legacy 30-berry-only modes — still resolvable for older history samples
   const isPint30 = sampleMethod === 'pint30'
   const is18oz30 = sampleMethod === '18oz30'
   const isMightyBlue30 = sampleMethod === 'mightyblue30'
-  const isClamshell30 = isPint30 || is18oz30 || isMightyBlue30 || !!(registry.profiles[sampleMethod] && sampleMethod !== 'pint' && sampleMethod !== '600g' && sampleMethod !== 'fullcount' && sampleMethod !== 'manual')
+  const isClamshell30 = isPint30 || is18oz30 || isMightyBlue30 || !!(registry.profiles[sampleMethod] && sampleMethod !== 'pint' && sampleMethod !== '18oz' && sampleMethod !== 'mightyblue' && sampleMethod !== '600g' && sampleMethod !== 'fullcount' && sampleMethod !== 'manual')
 
   // Apply clamshell profile defaults when switching into a 30-berry mode
   useEffect(() => {
@@ -410,9 +451,14 @@ export default function CountEntry({ counts, setCounts, detailed, onToggleDetail
     : COLORS.text3
 
   // === Pint mode calculations ===
-  const CLAMSHELL_TARE = 20 // grams — typical pint clamshell weight
+  // Per-pack-type tare (pint=20, 18oz=30, mightyblue=20). Falls back to pint default
+  // for unknown sampleMethods (e.g. fullcount, manual — these don't render the clamshell card anyway).
+  const PACK_PROFILE = CLAMSHELL_PROFILES[sampleMethod] || CLAMSHELL_PROFILES.pint
+  const CLAMSHELL_TARE = PACK_PROFILE.tare
+  const PACK_LABEL_WEIGHT = PACK_PROFILE.labelWeight
   const pintGross = parseFloat(pintWeight) || 0
   const pintNetWeight = pintTare ? Math.max(0, pintGross - CLAMSHELL_TARE) : pintGross
+  // 600g-equivalent projection — for MBG cross-reporting consistency, always scaled to 600g
   const pintScaleFactor = pintNetWeight > 0 ? 600 / pintNetWeight : 0
   const pint600gEquivTotal = pintScaleFactor > 0 && parseInt(fullcountTotal) ? Math.round(parseInt(fullcountTotal) * pintScaleFactor) : null
 
@@ -440,7 +486,7 @@ export default function CountEntry({ counts, setCounts, detailed, onToggleDetail
     : COLORS.text3
 
   // === Active total — depends on mode ===
-  const estimatedTotal = (isFullCount || isPint) ? (parseInt(fullcountTotal) || null)
+  const estimatedTotal = (isFullCount || isPackTypeMode) ? (parseInt(fullcountTotal) || null)
     : isManual ? (parseInt(manualTotal) || null)
     : isClamshell30 ? clamshellEstimatedTotal
     : estimatedTotal600
@@ -468,12 +514,23 @@ export default function CountEntry({ counts, setCounts, detailed, onToggleDetail
         if (prev._sampleMethod === 'fullcount' && prev._fullcountTotal === t && prev._packWeight === w) return prev
         return { ...prev, _sampleMethod: 'fullcount', _fullcountTotal: t, _packWeight: w, _manualTotal: 0, _thirtyBerryWeight: 0, _pintWeight: 0 }
       })
-    } else if (isPint) {
+    } else if (isPackTypeMode) {
       const t = parseInt(fullcountTotal) || 0
       const pw = parseFloat(pintWeight) || 0
       setCounts(prev => {
-        if (prev._sampleMethod === 'pint' && prev._fullcountTotal === t && prev._pintWeight === pw) return prev
-        return { ...prev, _sampleMethod: 'pint', _fullcountTotal: t, _pintWeight: pw, _pintScaleFactor: pintScaleFactor, _pint600gEquivTotal: pint600gEquivTotal, _manualTotal: 0, _thirtyBerryWeight: 0, _packWeight: 0 }
+        if (prev._sampleMethod === sampleMethod && prev._fullcountTotal === t && prev._pintWeight === pw) return prev
+        return {
+          ...prev,
+          _sampleMethod: sampleMethod,
+          _fullcountTotal: t,
+          _pintWeight: pw,
+          _pintScaleFactor: pintScaleFactor,
+          _pint600gEquivTotal: pint600gEquivTotal,
+          _packLabelWeight: PACK_LABEL_WEIGHT,
+          _manualTotal: 0,
+          _thirtyBerryWeight: 0,
+          _packWeight: 0,
+        }
       })
     } else if (isClamshell30) {
       const w30 = parseFloat(clamshell30Weight) || 0
@@ -508,7 +565,7 @@ export default function CountEntry({ counts, setCounts, detailed, onToggleDetail
         return { ...prev, _sampleMethod: '600g', _thirtyBerryWeight: w, _manualTotal: 0, _fullcountTotal: 0, _packWeight: 0, _pintWeight: 0 }
       })
     }
-  }, [thirtyBerryWeight, manualTotal, fullcountTotal, packWeight, pintWeight, clamshell30Weight, clamshellGross, clamshellNetOverride, clamshellLabel, clamshellTareOn, clamshellTareVal, isManual, isFullCount, isPint, isClamshell30, sampleMethod])
+  }, [thirtyBerryWeight, manualTotal, fullcountTotal, packWeight, pintWeight, clamshell30Weight, clamshellGross, clamshellNetOverride, clamshellLabel, clamshellTareOn, clamshellTareVal, isManual, isFullCount, isPackTypeMode, isClamshell30, sampleMethod, pintScaleFactor, pint600gEquivTotal, PACK_LABEL_WEIGHT])
 
   // Auto-calculate good when total or defects change
   useEffect(() => {
@@ -525,7 +582,7 @@ export default function CountEntry({ counts, setCounts, detailed, onToggleDetail
         return { ...prev, good: newGood }
       })
     }
-  }, [(isFullCount || isPint) ? fullcountTotal : isManual ? manualTotal : isClamshell30 ? clamshell30Weight : thirtyBerryWeight, estimatedTotal])
+  }, [(isFullCount || isPackTypeMode) ? fullcountTotal : isManual ? manualTotal : isClamshell30 ? clamshell30Weight : thirtyBerryWeight, estimatedTotal])
 
   const update = (key, val) => {
     const newVal = Math.max(0, parseInt(val) || 0)
@@ -725,12 +782,12 @@ export default function CountEntry({ counts, setCounts, detailed, onToggleDetail
       {!simpleView && <SOPSteps steps={methodConfig.steps} />}
 
       {/* === SAMPLE SIZE INPUT — mode-dependent === */}
-      {(isFullCount || isPint) ? (
+      {(isFullCount || isPackTypeMode) ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
-          {/* Pint: clamshell weight — used for 600g equivalent scaling */}
-          {isPint ? (
+          {/* Pack-type modes: clamshell weight — fill audit + 600g equivalent scaling */}
+          {isPackTypeMode ? (
             <div style={{
-              background: COLORS.bg2, border: `1px solid #10B98140`,
+              background: COLORS.bg2, border: `1px solid ${methodConfig.color}40`,
               borderRadius: 4, padding: '10px 12px',
             }}>
               <div style={{
@@ -739,14 +796,14 @@ export default function CountEntry({ counts, setCounts, detailed, onToggleDetail
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <div style={{
-                    fontFamily: FONT, fontSize: 9, color: '#10B981',
+                    fontFamily: FONT, fontSize: 9, color: methodConfig.color,
                     textTransform: 'uppercase', letterSpacing: '0.06em',
                   }}>{pintTare ? 'Gross Weight (g)' : 'Net Berry Weight (g)'}</div>
                   <button onClick={() => setPintTare(prev => !prev)} style={{
                     fontFamily: FONT, fontSize: 8, fontWeight: 600,
-                    color: pintTare ? '#10B981' : COLORS.text3,
-                    background: pintTare ? '#10B98115' : 'transparent',
-                    border: `1px solid ${pintTare ? '#10B981' : COLORS.border}`,
+                    color: pintTare ? methodConfig.color : COLORS.text3,
+                    background: pintTare ? methodConfig.color + '15' : 'transparent',
+                    border: `1px solid ${pintTare ? methodConfig.color : COLORS.border}`,
                     padding: '1px 6px', borderRadius: 3, cursor: 'pointer',
                     letterSpacing: '0.04em',
                   }}>
@@ -778,7 +835,7 @@ export default function CountEntry({ counts, setCounts, detailed, onToggleDetail
                 />
                 {pint600gEquivTotal && (
                   <div style={{
-                    fontFamily: FONT, fontSize: 11, color: '#10B981', fontWeight: 600,
+                    fontFamily: FONT, fontSize: 11, color: methodConfig.color, fontWeight: 600,
                   }}>
                     600g equiv: ~{pint600gEquivTotal} berries
                   </div>
@@ -823,11 +880,11 @@ export default function CountEntry({ counts, setCounts, detailed, onToggleDetail
           )}
           {/* Total berries — from camera */}
           <div style={{
-            background: COLORS.bg2, border: `1px solid ${isPint ? '#10B98140' : '#2563EB40'}`,
+            background: COLORS.bg2, border: `1px solid ${isPackTypeMode ? methodConfig.color + '40' : '#2563EB40'}`,
             borderRadius: 4, padding: '10px 12px',
           }}>
             <div style={{
-              fontFamily: FONT, fontSize: 9, color: isPint ? '#10B981' : '#2563EB',
+              fontFamily: FONT, fontSize: 9, color: isPackTypeMode ? methodConfig.color : '#2563EB',
               textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6,
             }}>Total Berries — camera count</div>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
@@ -844,7 +901,7 @@ export default function CountEntry({ counts, setCounts, detailed, onToggleDetail
               />
               {estimatedTotal && (
                 <div style={{
-                  fontFamily: FONT, fontSize: 11, color: isPint ? '#10B981' : '#2563EB', fontWeight: 600,
+                  fontFamily: FONT, fontSize: 11, color: isPackTypeMode ? methodConfig.color : '#2563EB', fontWeight: 600,
                 }}>
                   every berry inspected
                 </div>
@@ -1171,7 +1228,7 @@ export default function CountEntry({ counts, setCounts, detailed, onToggleDetail
               <div>{estimatedTotal} total</div>
             </>
           ) : (
-            <div>{(isFullCount || isPint) ? 'Snap photo for count' : isManual ? 'Enter total berry count' : 'Enter 30-berry weight'}</div>
+            <div>{(isFullCount || isPackTypeMode) ? 'Snap photo for count' : isManual ? 'Enter total berry count' : 'Enter 30-berry weight'}</div>
           )}
         </div>
       </div>

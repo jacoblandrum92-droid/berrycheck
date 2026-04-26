@@ -186,7 +186,9 @@ export default function SampleHistory({ history, onClear, onEdit }) {
                       {s.grower && <span>{s.grower}</span>}
                       {s._sampleMethod === 'pint' && <span style={{ color: '#10B981' }}>PINT</span>}
                       {s._sampleMethod === 'pint30' && <span style={{ color: '#1E40AF' }}>PINT 30</span>}
+                      {s._sampleMethod === '18oz' && <span style={{ color: '#EA580C' }}>18OZ</span>}
                       {s._sampleMethod === '18oz30' && <span style={{ color: '#EA580C' }}>18OZ 30</span>}
+                      {s._sampleMethod === 'mightyblue' && <span style={{ color: '#0891B2' }}>MIGHTY BLUE</span>}
                       {s._sampleMethod === 'mightyblue30' && <span style={{ color: '#0891B2' }}>MIGHTY BLUE 30</span>}
                       {s._sampleMethod === '600g' && <span style={{ color: COLORS.text3 }}>600G</span>}
                       {s._sampleMethod === 'manual' && <span style={{ color: COLORS.purple }}>MANUAL</span>}
@@ -343,9 +345,10 @@ function SampleDetails({ sample: s, result, onEdit }) {
   // Sample method metadata
   const methodLabel = {
     fullcount: 'Full Count (camera)', manual: 'Manual Count',
-    '600g': '600g Subsample', pint: 'Pint (camera)',
-    pint30: 'Pint 30-berry', '18oz30': '18oz 30-berry',
-    mightyblue30: 'Mighty Blue 30-berry',
+    '600g': '600g Subsample',
+    pint: 'Pint (camera)', pint30: 'Pint 30-berry',
+    '18oz': '18oz (camera)', '18oz30': '18oz 30-berry',
+    mightyblue: 'Mighty Blue (camera)', mightyblue30: 'Mighty Blue 30-berry',
   }[s._sampleMethod] || s._sampleMethod || '—'
 
   return (

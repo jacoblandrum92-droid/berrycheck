@@ -897,18 +897,22 @@ function Dashboard() {
       {view === 'qc' ? (
         /* ========== QC MODE ========== */
         (() => {
-          // Compute active pack theme — loud color so QCer knows which pack type
+          // Compute active pack theme — loud color so QCer knows which pack type.
+          // Per-pack-type modes (pint / 18oz / mightyblue) and legacy 30-berry-only modes
+          // (pint30 / 18oz30 / mightyblue30) share colors per pack type.
           const BUILTIN_PACK_COLORS = {
-            pint: '#10B981',       // green — camera pint
-            pint30: '#1E40AF',     // blue — pint 30-berry
-            '18oz30': '#EA580C',   // orange — 18oz 30-berry
-            mightyblue30: '#0891B2', // teal — 9.8oz Mighty Blue 30-berry
+            pint: '#10B981',         // green — pint (camera)
+            pint30: '#1E40AF',       // blue — pint (30-berry, legacy)
+            '18oz': '#EA580C',       // orange — 18oz (camera)
+            '18oz30': '#EA580C',     // orange — 18oz (30-berry, legacy)
+            mightyblue: '#0891B2',   // teal — Mighty Blue (camera)
+            mightyblue30: '#0891B2', // teal — Mighty Blue (30-berry, legacy)
           }
           let packColor = BUILTIN_PACK_COLORS[sampleMethod] || null
           let packLabel = null
           if (sampleMethod === 'pint' || sampleMethod === 'pint30') packLabel = 'PINT'
-          else if (sampleMethod === '18oz30') packLabel = '18OZ'
-          else if (sampleMethod === 'mightyblue30') packLabel = 'MIGHTY BLUE'
+          else if (sampleMethod === '18oz' || sampleMethod === '18oz30') packLabel = '18OZ'
+          else if (sampleMethod === 'mightyblue' || sampleMethod === 'mightyblue30') packLabel = 'MIGHTY BLUE'
           else {
             try {
               const customs = JSON.parse(localStorage.getItem('bc_custom_methods') || '[]')
@@ -1175,7 +1179,8 @@ function Dashboard() {
                       const total = (typeof countOrObj === 'object' && countOrObj !== null)
                         ? countOrObj.total : countOrObj
                       setCounts(prev => ({ ...prev, _fullcountTotal: total, _source: 'grader' }))
-                      if (sampleMethod !== 'fullcount' && sampleMethod !== 'pint') setSampleMethod('fullcount')
+                      // Camera count only auto-routes to fullcount if the QCer isn't already in a camera-clamshell mode
+                      if (sampleMethod !== 'fullcount' && sampleMethod !== 'pint' && sampleMethod !== '18oz' && sampleMethod !== 'mightyblue') setSampleMethod('fullcount')
                     }}
                   />
                   {!incomingImage && (
@@ -1282,7 +1287,9 @@ function Dashboard() {
                   sampleMethod={sampleMethod}
                   onToggleMethod={() => setSampleMethod(prev =>
                     prev === 'fullcount' ? 'pint'
-                    : prev === 'pint' ? 'pint30'
+                    : prev === 'pint' ? '18oz'
+                    : prev === '18oz' ? 'mightyblue'
+                    : prev === 'mightyblue' ? 'pint30'
                     : prev === 'pint30' ? '18oz30'
                     : prev === '18oz30' ? 'mightyblue30'
                     : prev === 'mightyblue30' ? '600g'
