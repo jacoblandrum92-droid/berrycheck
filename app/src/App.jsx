@@ -972,10 +972,12 @@ function Dashboard() {
                 />
               )}
 
-              {/* Pallet identity — Daily # + Tag + Pack Code + layer visual; wraps on narrow */}
+              {/* Pallet identity — Daily # + Tag + Pack Code + layer visual; wraps on narrow.
+                  justify-center so the wrapped second row (Layer / BOX WEIGHT / ASSIGN TAG) sits centered
+                  rather than hugging the left. The first row still fills the width because Pack Code grows. */}
               <div style={{
                 display: 'flex', alignItems: 'stretch', gap: 10,
-                flexWrap: 'wrap',
+                flexWrap: 'wrap', justifyContent: 'center',
                 padding: '12px 14px',
                 background: themed ? packColor + '12' : COLORS.bg2,
                 borderBottom: `1px solid ${themed ? packColor + '30' : COLORS.border}`,
@@ -1095,6 +1097,24 @@ function Dashboard() {
                     onToggleCompact={() => setPalletLayersCompact(v => !v)}
                   />
                 </div>
+
+                {/* BOX WEIGHT — sized to match Layer group, full-height single button */}
+                <div style={{ flex: '0 0 170px', display: 'flex', alignItems: 'stretch' }}>
+                  <button
+                    onClick={() => { setBoxWeightMode(v => !v); if (boxWeightMode) setBoxWeights([]) }}
+                    style={{
+                      width: '100%', flex: 1,
+                      fontFamily: FONT, fontSize: 14, fontWeight: 800,
+                      color: boxWeightMode ? '#fff' : COLORS.amber,
+                      background: boxWeightMode ? COLORS.amber : 'transparent',
+                      border: `2px solid ${COLORS.amber}`,
+                      borderRadius: 6, cursor: 'pointer',
+                      letterSpacing: '0.12em',
+                      padding: '8px 10px',
+                      lineHeight: 1.25,
+                    }}>BOX<br />WEIGHT{boxWeightMode ? ' ●' : ''}</button>
+                </div>
+
               </div>
 
               {/* Receipt context — thin strip when set */}
@@ -1140,16 +1160,7 @@ function Dashboard() {
                   padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
                   letterSpacing: '0.06em',
                 }}>SCALE {scaleConnected ? '\u25cf' : ''}</button>
-                <button
-                  onClick={() => { setBoxWeightMode(v => !v); if (boxWeightMode) setBoxWeights([]) }}
-                  style={{
-                    fontFamily: FONT, fontSize: 9, fontWeight: 700,
-                    color: boxWeightMode ? '#fff' : COLORS.amber,
-                    background: boxWeightMode ? COLORS.amber : 'transparent',
-                    border: `1px solid ${COLORS.amber}`,
-                    padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
-                    letterSpacing: '0.06em',
-                  }}>BOX WEIGHT {boxWeightMode ? '\u25cf' : ''}</button>
+                <div style={{ flex: 1 }} />
                 <button onClick={() => setShowAssignTag(true)} style={{
                   fontFamily: FONT, fontSize: 9, fontWeight: 700,
                   color: COLORS.purple, background: 'transparent',
@@ -1157,7 +1168,6 @@ function Dashboard() {
                   padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
                   letterSpacing: '0.06em',
                 }}>ASSIGN TAG</button>
-                <div style={{ flex: 1 }} />
                 <button onClick={() => setShowLogManager(true)} style={{
                   fontFamily: FONT, fontSize: 11, fontWeight: 700,
                   color: '#fff', background: COLORS.amber,
