@@ -422,3 +422,41 @@ export function gradeSample(counts, tolerances) {
 function round1(n) {
   return Math.round(n * 10) / 10
 }
+
+// ============================================================
+// PACK WEIGHT TOLERANCE — color rules for clamshell fill/box weights
+// ============================================================
+//
+// Green:  |dev| <= greenPct of label weight (e.g., ±2% of 302g = ±6.04g)
+// Yellow: outside green band but overweight <= yellowOverG  (or any underweight)
+// Red:    overweight > yellowOverG (severely over — cost/giveaway concern)
+
+export const DEFAULT_PACK_TOLERANCE = { greenPct: 2, yellowOverG: 20 }
+
+export function loadPackTolerance() {
+  try {
+    const raw = localStorage.getItem('bc_pack_tolerance')
+    if (!raw) return { ...DEFAULT_PACK_TOLERANCE }
+    const parsed = JSON.parse(raw)
+    return { ...DEFAULT_PACK_TOLERANCE, ...parsed }
+  } catch { return { ...DEFAULT_PACK_TOLERANCE } }
+}
+
+export function savePackTolerance(rules) {
+  try { localStorage.setItem('bc_pack_tolerance', JSON.stringify(rules)) } catch {}
+}
+
+export function classifyWeight(w, labelWeight, rules) {
+  const r = rules || DEFAULT_PACK_TOLERANCE
+  const dev = w - (labelWeight || 0)
+  const greenBandG = (labelWeight || 0) * (r.greenPct / 100)
+  if (Math.abs(dev) <= greenBandG) return 'green'
+  if (dev > r.yellowOverG) return 'red'
+  return 'yellow'
+}
+
+export const CLASS_COLORS = {
+  green: '#0F6E56',
+  yellow: '#BA7517',
+  red: '#A32D2D',
+}

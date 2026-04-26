@@ -36,12 +36,15 @@
       "electron/**/*",
       "server.js",
       "camera_service.py",
+      "scale_service.py",
       "berry_hsv_values.json"
     ],
     "extraFiles": [
       { "from": "dist", "to": "dist" },
       { "from": "camera_service.py", "to": "camera_service.py" },
-      { "from": "berry_hsv_values.json", "to": "berry_hsv_values.json" }
+      { "from": "scale_service.py", "to": "scale_service.py" },
+      { "from": "berry_hsv_values.json", "to": "berry_hsv_values.json" },
+      { "from": "ml", "to": "ml", "filter": ["**/*", "!dataset/**", "!runs/**"] }
     ],
     "directories": {
       "output": "release"

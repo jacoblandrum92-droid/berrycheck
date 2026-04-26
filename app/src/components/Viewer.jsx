@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { classifyWeight, loadPackTolerance } from '../constants'
 
 const COLORS = {
   bg: '#ffffff', bg2: '#f7f7f5', border: '#ddd',
@@ -50,6 +51,7 @@ export default function Viewer() {
   // Route to the right view based on snapshot type
   const views = {
     grade: GradeView,
+    box: BoxView,
     lotSummary: LotSummaryView,
     lineMonitor: LineMonitorView,
     packLog: PackLogView,
@@ -91,7 +93,7 @@ export default function Viewer() {
         }}>
           {availableViews.map(key => {
             const labels = {
-              grade: 'Grade', lotSummary: 'Pallet', lineMonitor: 'Line', packLog: 'Pack Log',
+              grade: 'Grade', box: 'Box', lotSummary: 'Pallet', lineMonitor: 'Line', packLog: 'Pack Log',
             }
             const active = snapshot.type === key
             return (
@@ -119,16 +121,69 @@ export default function Viewer() {
 function GradeView({ data }) {
   const g = data.grade || {}
   const gc = GRADE_COLORS[g.grade] || GRADE_COLORS.good
+  const isEmpty = !g.label || g.label === '—' || (g.total || 0) === 0
+
+  // Pack method badge
+  const methodColor = {
+    pint: '#10B981', pint30: '#1E40AF', '18oz30': '#EA580C', mightyblue30: '#0891B2',
+    '600g': COLORS.text3, fullcount: '#2563EB', manual: '#534AB7',
+  }[data.sampleMethod] || COLORS.text3
+  const methodLabel = {
+    pint: 'PINT (camera)', pint30: 'PINT 30', '18oz30': '18OZ 30', mightyblue30: 'MIGHTY BLUE 30',
+    '600g': '600G SUBSAMPLE', fullcount: 'FULL COUNT', manual: 'MANUAL COUNT',
+  }[data.sampleMethod] || data.sampleMethod
 
   return (
     <div>
-      {/* Pallet info */}
-      {(data.lotId || data.receiptNum) && (
-        <div style={{ marginBottom: 16, fontSize: 12, color: COLORS.text2 }}>
-          {data.lotId && <span style={{ fontWeight: 600, color: COLORS.text, marginRight: 12 }}>{data.lotId}</span>}
-          {data.receiptNum && <span>{data.receiptNum}</span>}
-          {data.grower && <span> — {data.grower}</span>}
-          {data.variety && <span> / {data.variety}</span>}
+      {/* Pallet info header */}
+      <div style={{
+        marginBottom: 14, padding: '10px 12px',
+        background: COLORS.bg2, borderRadius: 8,
+        border: `1px solid ${COLORS.border}`,
+      }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'baseline' }}>
+          {data.dailyPalletNum && (
+            <span style={{ fontSize: 18, fontWeight: 800, color: COLORS.green }}>
+              #{data.dailyPalletNum}
+            </span>
+          )}
+          {data.lotId && <span style={{ fontSize: 14, fontWeight: 700, color: COLORS.text }}>{data.lotId}</span>}
+          {data.packLine && <span style={{ fontSize: 11, color: COLORS.text3 }}>Line {data.packLine}</span>}
+          {data.time && <span style={{ fontSize: 11, color: COLORS.text3, marginLeft: 'auto' }}>{data.time}</span>}
+        </div>
+        {(data.receiptNum || data.grower || data.variety) && (
+          <div style={{ fontSize: 11, color: COLORS.text2, marginTop: 4 }}>
+            {data.receiptNum && <span>{data.receiptNum}</span>}
+            {data.grower && <span> — {data.grower}</span>}
+            {data.variety && <span> / {data.variety}</span>}
+          </div>
+        )}
+        {methodLabel && (
+          <div style={{
+            display: 'inline-block', marginTop: 6, padding: '2px 8px',
+            fontSize: 9, fontWeight: 700, color: methodColor,
+            background: methodColor + '15', border: `1px solid ${methodColor}40`,
+            borderRadius: 3, letterSpacing: '0.06em',
+          }}>{methodLabel}</div>
+        )}
+        {data.clamshellNet > 0 && (
+          <div style={{ fontSize: 10, color: COLORS.text2, marginTop: 6 }}>
+            Net: <b>{(typeof data.clamshellNet === 'number' ? data.clamshellNet : parseFloat(data.clamshellNet)).toFixed(1)}g</b>
+            {data.clamshellLabel > 0 && <span style={{ color: COLORS.text3 }}> / {data.clamshellLabel}g label</span>}
+          </div>
+        )}
+      </div>
+
+      {isEmpty && (
+        <div style={{
+          padding: 18, marginBottom: 16, textAlign: 'center',
+          background: COLORS.bg2, border: `1px dashed ${COLORS.border}`,
+          borderRadius: 8,
+        }}>
+          <div style={{ fontSize: 13, color: COLORS.text2, fontWeight: 600 }}>No sample data in this snapshot</div>
+          <div style={{ fontSize: 10, color: COLORS.text3, marginTop: 4 }}>
+            Generate a new QR after logging a sample or entering counts.
+          </div>
         </div>
       )}
 
@@ -200,6 +255,140 @@ function GradeView({ data }) {
             {g.bottleneck.remaining}% room
           </div>
           <div style={{ fontSize: 11, color: COLORS.text2 }}>{g.bottleneck.name}</div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ========== BOX VIEW ==========
+function BoxView({ data }) {
+  const b = data.box || {}
+  const pct = b.pctInSpec || 0
+  const passColor = pct >= 95 ? COLORS.green : pct >= 85 ? COLORS.amber : COLORS.red
+  const passLabel = b.count > 0 ? (pct >= 95 ? 'PASS' : pct >= 85 ? 'BORDERLINE' : 'FAIL') : '—'
+  const passBg = pct >= 95 ? COLORS.greenBg : pct >= 85 ? COLORS.amberBg : COLORS.redBg
+
+  const packColor = data.sampleMethod === '18oz30' ? '#EA580C'
+    : data.sampleMethod === 'pint30' ? '#1E40AF'
+    : data.sampleMethod === 'mightyblue30' ? '#0891B2' : COLORS.text3
+  const packLabel = data.sampleMethod === '18oz30' ? '18OZ'
+    : data.sampleMethod === 'pint30' ? 'PINT'
+    : data.sampleMethod === 'mightyblue30' ? 'MIGHTY BLUE' : (data.sampleMethod || '').toUpperCase()
+
+  return (
+    <div>
+      {/* Header */}
+      <div style={{
+        marginBottom: 14, padding: '10px 12px',
+        background: COLORS.bg2, borderRadius: 8, border: `1px solid ${COLORS.border}`,
+      }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'baseline' }}>
+          {data.dailyPalletNum && (
+            <span style={{ fontSize: 18, fontWeight: 800, color: COLORS.green }}>#{data.dailyPalletNum}</span>
+          )}
+          {data.lotId && <span style={{ fontSize: 14, fontWeight: 700, color: COLORS.text }}>{data.lotId}</span>}
+          {data.time && <span style={{ fontSize: 11, color: COLORS.text3, marginLeft: 'auto' }}>{data.time}</span>}
+        </div>
+        <div style={{
+          display: 'inline-block', marginTop: 6, padding: '3px 10px',
+          fontSize: 10, fontWeight: 800, color: packColor,
+          background: packColor + '15', border: `1px solid ${packColor}60`,
+          borderRadius: 3, letterSpacing: '0.08em',
+        }}>BOX WEIGHT · {packLabel}</div>
+      </div>
+
+      {/* Pass/fail big badge */}
+      <div style={{
+        background: passBg, borderRadius: 12, padding: 20,
+        textAlign: 'center', marginBottom: 14,
+        border: `2px solid ${passColor}`,
+      }}>
+        <div style={{ fontSize: 36, fontWeight: 800, color: passColor, lineHeight: 1 }}>
+          {passLabel}
+        </div>
+        <div style={{ fontSize: 13, color: passColor, marginTop: 8, fontWeight: 600 }}>
+          {b.count > 0
+            ? `${b.inSpec}/${b.count} in spec (${pct.toFixed(1)}%)`
+            : 'No weights captured'}
+        </div>
+      </div>
+
+      {/* Stats grid */}
+      {b.count > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 14 }}>
+          {[
+            { k: 'Mean', v: (b.mean || 0).toFixed(1) + 'g', c: COLORS.text },
+            { k: 'Min', v: (b.min || 0).toFixed(1) + 'g', c: COLORS.text2 },
+            { k: 'Max', v: (b.max || 0).toFixed(1) + 'g', c: COLORS.text2 },
+            { k: 'Label', v: (b.labelWeight || 0) + 'g', c: packColor },
+            { k: 'Tolerance', v: '±' + (b.tolerance || 0) + 'g', c: COLORS.text2 },
+            { k: 'N', v: b.count, c: COLORS.text },
+          ].map(s => (
+            <div key={s.k} style={{
+              background: COLORS.bg2, borderRadius: 6, padding: 10, textAlign: 'center',
+              border: `1px solid ${COLORS.border}`,
+            }}>
+              <div style={{ fontSize: 18, fontWeight: 700, color: s.c }}>{s.v}</div>
+              <div style={{ fontSize: 9, color: COLORS.text3, marginTop: 2, letterSpacing: '0.06em', textTransform: 'uppercase' }}>{s.k}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Under/over summary */}
+      {b.count > 0 && (b.under > 0 || b.over > 0) && (
+        <div style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
+          {b.under > 0 && (
+            <div style={{
+              flex: 1, background: COLORS.redBg, border: `1px solid ${COLORS.red}`,
+              borderRadius: 6, padding: 10, textAlign: 'center',
+            }}>
+              <div style={{ fontSize: 22, fontWeight: 800, color: COLORS.red }}>↓ {b.under}</div>
+              <div style={{ fontSize: 9, color: COLORS.red, marginTop: 2 }}>UNDER {(b.labelWeight - b.tolerance).toFixed(1)}g</div>
+            </div>
+          )}
+          {b.over > 0 && (
+            <div style={{
+              flex: 1, background: COLORS.amberBg, border: `1px solid ${COLORS.amber}`,
+              borderRadius: 6, padding: 10, textAlign: 'center',
+            }}>
+              <div style={{ fontSize: 22, fontWeight: 800, color: COLORS.amber }}>↑ {b.over}</div>
+              <div style={{ fontSize: 9, color: COLORS.amber, marginTop: 2 }}>OVER {(b.labelWeight + b.tolerance).toFixed(1)}g</div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Weight list */}
+      {Array.isArray(b.weights) && b.weights.length > 0 && (
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 700, color: COLORS.text3, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 6 }}>
+            Individual Weights
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 4 }}>
+            {b.weights.map((w, i) => {
+              const rules = loadPackTolerance()
+              const cls = classifyWeight(w, b.labelWeight, rules)
+              const isUnder = w < b.labelWeight - b.labelWeight * rules.greenPct / 100
+              const c = cls === 'green' ? COLORS.green : cls === 'yellow' ? COLORS.amber : COLORS.red
+              const inSp = cls === 'green'
+              return (
+                <div key={i} style={{
+                  display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px',
+                  background: c === COLORS.green ? COLORS.greenBg
+                    : c === COLORS.amber ? COLORS.amberBg : COLORS.redBg,
+                  border: `1px solid ${c}60`, borderRadius: 4,
+                }}>
+                  <span style={{ fontSize: 9, color: COLORS.text3, width: 22 }}>#{i + 1}</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: c, flex: 1 }}>{w.toFixed(1)}g</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: c }}>
+                    {inSp ? '✓' : isUnder ? '↓' : '↑'}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
         </div>
       )}
     </div>

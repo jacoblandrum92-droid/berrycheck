@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react'
-import { COLORS, FONT, gradeSample, PACK_CRITERIA, GRADE_RANK, GRADING_STANDARDS } from './constants'
+import { COLORS, FONT, gradeSample, PACK_CRITERIA, GRADE_RANK, GRADING_STANDARDS, classifyWeight, CLASS_COLORS, loadPackTolerance } from './constants'
 
 // Server-backed storage helper — write to both localStorage and server
 function serverSave(key, data) {
@@ -10,6 +10,7 @@ function serverSave(key, data) {
 }
 import { loadFeatures, saveFeatures } from './featureFlags'
 import { loadReceipts } from './receipts'
+import { loadPackCodes, loadFavorites } from './packCodes'
 import { useRelay } from './useRelay'
 import { countBerriesInZones } from './imageProcessor'
 import { ensureLandscape } from './rotateImage'
@@ -53,9 +54,11 @@ import WeatherBanner from './components/WeatherBanner'
 import DayClose from './components/DayClose'
 import ChemicalInventory from './components/ChemicalInventory'
 import ChemicalLog from './components/ChemicalLog'
+import SanitizerCalculator from './components/SanitizerCalculator'
 import PrePackNotes, { PrePackBanner } from './components/PrePackNotes'
 import CameraTuner from './components/CameraTuner'
 import ZoneConfirm from './components/ZoneConfirm'
+import PalletTagAssign from './components/PalletTagAssign'
 
 export default function App() {
   const mode = new URLSearchParams(window.location.search).get('mode')
@@ -75,6 +78,7 @@ function Dashboard() {
   const [fontScale, setFontScale] = useState(() => {
     return localStorage.getItem('bc_font_scale') || 'normal'
   })
+  const [cameraResetAt, setCameraResetAt] = useState(0)
 
   // Sync from server on mount — pull shared data into localStorage
   const [synced, setSynced] = useState(false)
@@ -98,29 +102,78 @@ function Dashboard() {
   // Persist features on change
   useEffect(() => { saveFeatures(features) }, [features])
 
-  // Daily pallet number — auto-generated from pack log
-  const [dailyPalletNum, setDailyPalletNum] = useState(() => {
+  // Camera reset hotkey: Ctrl+Alt+C → POST /api/restart-camera
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!e.ctrlKey || !e.altKey || e.shiftKey || e.metaKey) return
+      if ((e.key || '').toLowerCase() !== 'c') return
+      const t = e.target
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+      e.preventDefault()
+      fetch('/api/restart-camera', { method: 'POST' }).catch(() => {})
+      setCameraResetAt(Date.now())
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  useEffect(() => {
+    if (!cameraResetAt) return
+    const id = setTimeout(() => setCameraResetAt(0), 2000)
+    return () => clearTimeout(id)
+  }, [cameraResetAt])
+
+  // === Line slots (two pallets worked in parallel, one per line) ===
+  const INIT_ACTIVE_LINE = (() => {
+    try { return localStorage.getItem('bc_active_line') || 'line1' } catch { return 'line1' }
+  })()
+  const INIT_SLOT = (() => {
+    try { return JSON.parse(localStorage.getItem(`bc_slot_${INIT_ACTIVE_LINE}`) || '{}') } catch { return {} }
+  })()
+  // Find last pack code used on a given line (looks back through bc_history)
+  const findLastPackCodeForLine = (packLine) => {
+    try {
+      const history = JSON.parse(localStorage.getItem('bc_history') || '[]')
+      for (let i = history.length - 1; i >= 0; i--) {
+        const s = history[i]
+        if (String(s.packLine) === String(packLine) && s.packCode) return s.packCode
+      }
+    } catch {}
+    return ''
+  }
+  const computeDailyPalletDefault = () => {
     try {
       const today = new Date().toLocaleDateString()
       const log = JSON.parse(localStorage.getItem('bc_packlog') || '[]')
       return log.filter(e => e.date === today).reduce((max, e) => Math.max(max, e.dailyPallet || 0), 0) + 1
     } catch { return 1 }
+  }
+
+  const [activeLine, setActiveLine] = useState(INIT_ACTIVE_LINE)
+  const [dualLineMode, setDualLineMode] = useState(() => {
+    try { return localStorage.getItem('bc_dual_line_mode') === 'true' } catch { return false }
   })
+  useEffect(() => {
+    try { localStorage.setItem('bc_dual_line_mode', dualLineMode ? 'true' : 'false') } catch {}
+  }, [dualLineMode])
+
+  // Daily pallet number — auto-generated from pack log
+  const [dailyPalletNum, setDailyPalletNum] = useState(INIT_SLOT.dailyPalletNum || computeDailyPalletDefault())
 
   // Lot info
-  const [lotId, setLotId] = useState('')
-  const [packLine, setPackLine] = useState('')
-  const [receiptNum, setReceiptNum] = useState('')
-  const [grower, setGrower] = useState('')
-  const [variety, setVariety] = useState('')
-  const [packCriteria, setPackCriteria] = useState('standard')
-  const [lineRate, setLineRate] = useState('')
-  const [blowoff, setBlowoff] = useState('')
-  const [sizeDiversion, setSizeDiversion] = useState('')
+  const [lotId, setLotId] = useState(INIT_SLOT.lotId || '')
+  const [packLine, setPackLine] = useState(INIT_SLOT.packLine || (INIT_ACTIVE_LINE === 'line1' ? '1' : '2'))
+  const [receiptNum, setReceiptNum] = useState(INIT_SLOT.receiptNum || '')
+  const [grower, setGrower] = useState(INIT_SLOT.grower || '')
+  const [variety, setVariety] = useState(INIT_SLOT.variety || '')
+  const [packCriteria, setPackCriteria] = useState(INIT_SLOT.packCriteria || 'standard')
+  const [lineRate, setLineRate] = useState(INIT_SLOT.lineRate || '')
+  const [blowoff, setBlowoff] = useState(INIT_SLOT.blowoff || '')
+  const [sizeDiversion, setSizeDiversion] = useState(INIT_SLOT.sizeDiversion || '')
   // Counts
-  const [counts, setCounts] = useState({ good: 0, permanent: 0, condition: 0, decay: 0 })
+  const [counts, setCounts] = useState(INIT_SLOT.counts || { good: 0, permanent: 0, condition: 0, decay: 0 })
   // Scale weight capture — { weight: number, _source: 'scale'|'manual' } or null
-  const [capturedWeight, setCapturedWeight] = useState(null)
+  const [capturedWeight, setCapturedWeight] = useState(INIT_SLOT.capturedWeight || null)
 
   // Incoming image from phone
   const [incomingImage, setIncomingImage] = useState(null)
@@ -135,6 +188,7 @@ function Dashboard() {
   const [showLogManager, setShowLogManager] = useState(false)
   const [showChemicals, setShowChemicals] = useState(false)
   const [showChemLog, setShowChemLog] = useState(false)
+  const [showSanitizerCalc, setShowSanitizerCalc] = useState(false)
   const [showReceipts, setShowReceipts] = useState(false)
   const [showBarcodeSheet, setShowBarcodeSheet] = useState(false)
   const [showGradingGuide, setShowGradingGuide] = useState(false)
@@ -146,6 +200,13 @@ function Dashboard() {
   const [pendingZoneCounts, setPendingZoneCounts] = useState(null) // { counts, image, zones }
   const [showPackLog, setShowPackLog] = useState(false)
   const [showPackCodes, setShowPackCodes] = useState(false)
+  const [showAssignTag, setShowAssignTag] = useState(false)
+  const [palletLayersCompact, setPalletLayersCompact] = useState(() => {
+    try { return localStorage.getItem('bc_pallet_layers_compact') === 'true' } catch { return false }
+  })
+  useEffect(() => {
+    try { localStorage.setItem('bc_pallet_layers_compact', palletLayersCompact ? 'true' : 'false') } catch {}
+  }, [palletLayersCompact])
   const [detailedCounts, setDetailedCounts] = useState(true)
   const [sampleMethod, setSampleMethod] = useState('fullcount') // 'fullcount', '600g', or 'manual'
   const [gradingStandard, setGradingStandard] = useState('mbg') // 'mbg' or 'butterfly'
@@ -154,12 +215,78 @@ function Dashboard() {
   const [showDCReconcile, setShowDCReconcile] = useState(false)
   const [showPrePack, setShowPrePack] = useState(false)
   const [showReceiptChange, setShowReceiptChange] = useState(false)
-  const [palletReceipts, setPalletReceipts] = useState([]) // tracks receipt segments on current pallet
-  const [packCode, setPackCode] = useState('')
-  const [lastPackCode, setLastPackCode] = useState('')
+  const [palletReceipts, setPalletReceipts] = useState(INIT_SLOT.palletReceipts || []) // tracks receipt segments on current pallet
+  const [packCode, setPackCode] = useState(
+    INIT_SLOT.packCode !== undefined
+      ? INIT_SLOT.packCode
+      : findLastPackCodeForLine(INIT_SLOT.packLine || (INIT_ACTIVE_LINE === 'line1' ? '1' : '2'))
+  )
+  const [lastPackCode, setLastPackCode] = useState(INIT_SLOT.lastPackCode || '')
+  const [packCodeDB, setPackCodeDB] = useState(() => loadPackCodes())
+  const [packFavorites, setPackFavorites] = useState(() => loadFavorites())
+  // Refresh pack-code DB when the manager modal closes (so new entries appear in top card)
+  useEffect(() => {
+    if (!showPackCodes) {
+      setPackCodeDB(loadPackCodes())
+      setPackFavorites(loadFavorites())
+    }
+  }, [showPackCodes])
   const [showBackupForm, setShowBackupForm] = useState(false)
   const [showLineStats, setShowLineStats] = useState(null) // 'mid-sample' or 'close-out'
-  const [palletLineStats, setPalletLineStats] = useState(null) // stored once captured
+  const [palletLineStats, setPalletLineStats] = useState(INIT_SLOT.palletLineStats || null) // stored once captured
+  const [editingSample, setEditingSample] = useState(null) // sample object being edited/reassigned
+  const [boxWeightMode, setBoxWeightMode] = useState(false) // toggle: box-weight audit vs regular sampling
+  const [boxWeights, setBoxWeights] = useState([]) // array of numbers
+  const [boxTolerance, setBoxTolerance] = useState(() => {
+    try { return parseFloat(localStorage.getItem('bc_box_tolerance') || '5') } catch { return 5 }
+  })
+  useEffect(() => {
+    try { localStorage.setItem('bc_box_tolerance', String(boxTolerance)) } catch {}
+  }, [boxTolerance])
+
+  // Auto-persist current line's slot to localStorage on any relevant change
+  useEffect(() => {
+    try {
+      const slot = {
+        lotId, dailyPalletNum, packLine, receiptNum, grower, variety,
+        packCriteria, packCode, lastPackCode,
+        palletReceipts, palletLineStats,
+        lineRate, blowoff, sizeDiversion,
+        counts, capturedWeight,
+      }
+      localStorage.setItem(`bc_slot_${activeLine}`, JSON.stringify(slot))
+    } catch {}
+  }, [activeLine, lotId, dailyPalletNum, packLine, receiptNum, grower, variety, packCriteria, packCode, lastPackCode, palletReceipts, palletLineStats, lineRate, blowoff, sizeDiversion, counts, capturedWeight])
+
+  // Switch between line slots — saves current, loads target
+  const switchLine = useCallback((target) => {
+    if (target === activeLine) return
+    // Current state auto-persists via the effect above, so we can safely load target
+    let t = {}
+    try { t = JSON.parse(localStorage.getItem(`bc_slot_${target}`) || '{}') } catch {}
+    setLotId(t.lotId || '')
+    setDailyPalletNum(t.dailyPalletNum || computeDailyPalletDefault())
+    setPackLine(t.packLine || (target === 'line1' ? '1' : '2'))
+    setReceiptNum(t.receiptNum || '')
+    setGrower(t.grower || '')
+    setVariety(t.variety || '')
+    setPackCriteria(t.packCriteria || 'standard')
+    setPackCode(
+      t.packCode !== undefined
+        ? t.packCode
+        : findLastPackCodeForLine(t.packLine || (target === 'line1' ? '1' : '2'))
+    )
+    setLastPackCode(t.lastPackCode || '')
+    setPalletReceipts(t.palletReceipts || [])
+    setPalletLineStats(t.palletLineStats || null)
+    setLineRate(t.lineRate || '')
+    setBlowoff(t.blowoff || '')
+    setSizeDiversion(t.sizeDiversion || '')
+    setCounts(t.counts || { good: 0, permanent: 0, condition: 0, decay: 0 })
+    setCapturedWeight(t.capturedWeight || null)
+    setActiveLine(target)
+    try { localStorage.setItem('bc_active_line', target) } catch {}
+  }, [activeLine])
 
   // Training mode toggle — when ON, A/B data is saved for accuracy tracking
   const [trainingMode, setTrainingMode] = useState(() => {
@@ -309,6 +436,27 @@ function Dashboard() {
     pushDailySummary(h)
   }, [])
 
+  // Retroactively assign a pallet tag — updates every sample on (date, dailyPalletNum, packLine)
+  // and syncs the live slot if the active line+pallet matches
+  const assignPalletTag = useCallback((targetPackLine, targetDailyPallet, newTag) => {
+    const today = new Date().toLocaleDateString()
+    const tag = (newTag || '').trim()
+    const updated = history.map(s => {
+      if (s.date !== today) return s
+      if ((s.dailyPalletNum || 0) !== targetDailyPallet) return s
+      if (String(s.packLine || '') !== String(targetPackLine)) return s
+      return { ...s, lotId: tag }
+    })
+    saveHistory(updated)
+    // Sync live slot if the active pallet matches
+    const activePackLineStr = activeLine === 'line1' ? '1' : '2'
+    if (String(packLine) === String(targetPackLine) && dailyPalletNum === targetDailyPallet) {
+      setLotId(tag)
+    } else if (activePackLineStr === String(targetPackLine) && dailyPalletNum === targetDailyPallet) {
+      setLotId(tag)
+    }
+  }, [history, saveHistory, activeLine, packLine, dailyPalletNum])
+
   // Save accuracy log (A/B comparisons) to localStorage
   const saveAccuracyLog = useCallback((entry) => {
     try {
@@ -324,14 +472,16 @@ function Dashboard() {
       (counts.condition || 0) + (counts.decay || 0)
     if (!totalB) return
 
-    // Count how many official (non-extra) samples exist for this lot
-    const officialCount = history.filter(s => s.lotId === lotId && !s.isExtra).length
+    // Count official (non-extra) samples for today's daily pallet #
+    const todayStr = new Date().toLocaleDateString()
+    const sameLot = (s) => s.dailyPalletNum === dailyPalletNum && s.date === todayStr && !s.isExtra
+    const officialCount = history.filter(sameLot).length
 
     // Check for receipt bounceback on official samples
     // If this receipt was used, then a different one was used, and now this one is back — flag it
     let receiptWarning = null
     if (!isExtra && receiptNum) {
-      const officialSamples = history.filter(s => s.lotId === lotId && !s.isExtra && !s.isSkipped)
+      const officialSamples = history.filter(s => sameLot(s) && !s.isSkipped)
       if (officialSamples.length >= 2) {
         const receiptSequence = officialSamples.map(s => s.receiptNum)
         const lastReceipt = receiptSequence[receiptSequence.length - 1]
@@ -354,6 +504,7 @@ function Dashboard() {
       date: new Date().toLocaleDateString(),
       lotId, dailyPalletNum, packLine, receiptNum, grower, variety, packCriteria,
       ...counts,
+      _gradingStandard: gradingStandard,
       isExtra,
       sampleNum: isExtra ? null : officialCount + 1,
       receiptWarning: receiptWarning || null,
@@ -394,18 +545,63 @@ function Dashboard() {
   }, [counts, computerCounts, lotId, receiptNum, grower, variety, history, saveHistory, saveAccuracyLog, trainingMode])
 
   const logSample = useCallback(() => doLogSample(false), [doLogSample])
+
+  // Log a box-weight sample (EXTRA — doesn't consume a layer slot)
+  const logBoxWeightSample = useCallback((labelWeight, tolerance) => {
+    const weights = boxWeights.filter(w => w > 0)
+    if (weights.length === 0) return
+    const now = new Date()
+    const rules = loadPackTolerance()
+    const mean = weights.reduce((a, b) => a + b, 0) / weights.length
+    const min = Math.min(...weights)
+    const max = Math.max(...weights)
+    const classes = weights.map(w => classifyWeight(w, labelWeight, rules))
+    const inSpec = classes.filter(c => c === 'green').length
+    const under = weights.filter(w => w < labelWeight - labelWeight * rules.greenPct / 100).length
+    const over = classes.filter(c => c === 'red').length
+    const pctInSpec = (inSpec / weights.length) * 100
+    const sample = {
+      id: Date.now(),
+      time: now.toLocaleTimeString('en-US', { hour12: false }),
+      date: now.toLocaleDateString(),
+      lotId, dailyPalletNum, packLine, receiptNum, grower, variety, packCriteria,
+      good: 0, permanent: 0, condition: 0, decay: 0,
+      _sampleMethod: 'boxweight',
+      _gradingStandard: gradingStandard,
+      _boxWeights: weights,
+      _boxLabelWeight: labelWeight,
+      _boxTolerance: tolerance,
+      _boxMean: mean,
+      _boxMin: min,
+      _boxMax: max,
+      _boxCount: weights.length,
+      _boxInSpec: inSpec,
+      _boxUnder: under,
+      _boxOver: over,
+      _boxPctInSpec: pctInSpec,
+      isExtra: true,
+      sampleNum: null,
+    }
+    saveHistory([...history, sample])
+    setBoxWeights([])
+    setBoxWeightMode(false)
+  }, [boxWeights, lotId, dailyPalletNum, packLine, receiptNum, grower, variety, packCriteria, gradingStandard, history, saveHistory])
   const logExtraSample = useCallback(() => doLogSample(true), [doLogSample])
+
+  // Scope samples to today's daily pallet # (pallet tag may be blank while layers show)
+  const todayStr = new Date().toLocaleDateString()
+  const palletMatches = (s) =>
+    s.dailyPalletNum === dailyPalletNum && s.date === todayStr && !s.isExtra
 
   // Skip a layer — logs a blank placeholder so the layer counter advances
   const skipLayer = useCallback(() => {
-    const officialCount = history.filter(s => s.lotId === lotId && !s.isExtra).length
+    const officialCount = history.filter(palletMatches).length
     if (officialCount >= 3) return
-    const layerNames = { 0: 'BOTTOM', 1: 'MIDDLE', 2: 'TOP' }
     const sample = {
       id: Date.now(),
       time: new Date().toLocaleTimeString('en-US', { hour12: false }),
       date: new Date().toLocaleDateString(),
-      lotId, receiptNum, grower, variety,
+      lotId, dailyPalletNum, packLine, receiptNum, grower, variety,
       good: 0, permanent: 0, condition: 0, decay: 0,
       isExtra: false,
       isSkipped: true,
@@ -413,14 +609,59 @@ function Dashboard() {
     }
     saveHistory([...history, sample])
     // No alert — visible in layer indicator
-  }, [lotId, receiptNum, grower, variety, history, saveHistory])
+  }, [lotId, dailyPalletNum, packLine, receiptNum, grower, variety, history, saveHistory])
+
+  // Update or delete a sample by id (for layer editing / reassignment)
+  const updateSample = useCallback((id, patch) => {
+    const next = history.map(s => s.id === id ? { ...s, ...patch } : s)
+    saveHistory(next)
+  }, [history, saveHistory])
+
+  const deleteSample = useCallback((id) => {
+    const next = history.filter(s => s.id !== id)
+    saveHistory(next)
+  }, [history, saveHistory])
+
+  // Undo a skip — remove the skip entry for a given layer so it becomes empty again
+  const unskipLayer = useCallback((layerNum) => {
+    const filtered = history.filter(s =>
+      !(s.dailyPalletNum === dailyPalletNum && s.date === todayStr &&
+        s.sampleNum === layerNum && s.isSkipped && !s.isExtra)
+    )
+    if (filtered.length === history.length) return // nothing to remove
+    saveHistory(filtered)
+  }, [dailyPalletNum, todayStr, history, saveHistory])
+
+  // Skip up to a target layer — auto-fills skips for any earlier empty layers
+  const skipToLayer = useCallback((targetLayer) => {
+    const officialCount = history.filter(palletMatches).length
+    if (officialCount >= targetLayer - 1) return // already past
+    const now = new Date()
+    const time = now.toLocaleTimeString('en-US', { hour12: false })
+    const date = now.toLocaleDateString()
+    const newSamples = []
+    for (let i = officialCount; i < targetLayer - 1; i++) {
+      newSamples.push({
+        id: Date.now() + i,
+        time, date,
+        lotId, dailyPalletNum, packLine, receiptNum, grower, variety, packCriteria,
+        good: 0, permanent: 0, condition: 0, decay: 0,
+        isExtra: false, isSkipped: true,
+        sampleNum: i + 1,
+      })
+    }
+    saveHistory([...history, ...newSamples])
+  }, [lotId, dailyPalletNum, packLine, receiptNum, grower, variety, packCriteria, history, saveHistory])
 
   // Skip entire pallet — logs all remaining layers as skipped + pack log missed entry
   const skipPallet = useCallback(() => {
     if (!lotId) return alert('Set a pallet tag first')
     if (!confirm(`Skip pallet ${lotId}? All samples will be marked as missed.`)) return
 
-    const officialCount = history.filter(s => s.lotId === lotId && !s.isExtra).length
+    const todayStr2 = new Date().toLocaleDateString()
+    const officialCount = history.filter(s =>
+      s.dailyPalletNum === dailyPalletNum && s.date === todayStr2 && !s.isExtra
+    ).length
     const now = new Date()
     const time = now.toLocaleTimeString('en-US', { hour12: false })
     const date = now.toLocaleDateString()
@@ -587,6 +828,15 @@ function Dashboard() {
       color: COLORS.text, fontFamily: FONT, fontSize: 14,
       zoom: FONT_SCALES[fontScale] || 1,
     }}>
+      {cameraResetAt ? (
+        <div style={{
+          position: 'fixed', bottom: 16, right: 16, zIndex: 9999,
+          background: COLORS.panel || '#111', color: COLORS.text,
+          border: `1px solid ${COLORS.border}`, padding: '8px 14px',
+          fontFamily: FONT, fontSize: 11, letterSpacing: '0.06em',
+          borderRadius: 4,
+        }}>CAMERA RESET SENT</div>
+      ) : null}
       <Header
         onOpenCamera={() => setView('camera')}
         onResetZones={() => {
@@ -646,6 +896,28 @@ function Dashboard() {
 
       {view === 'qc' ? (
         /* ========== QC MODE ========== */
+        (() => {
+          // Compute active pack theme — loud color so QCer knows which pack type
+          const BUILTIN_PACK_COLORS = {
+            pint: '#10B981',       // green — camera pint
+            pint30: '#1E40AF',     // blue — pint 30-berry
+            '18oz30': '#EA580C',   // orange — 18oz 30-berry
+            mightyblue30: '#0891B2', // teal — 9.8oz Mighty Blue 30-berry
+          }
+          let packColor = BUILTIN_PACK_COLORS[sampleMethod] || null
+          let packLabel = null
+          if (sampleMethod === 'pint' || sampleMethod === 'pint30') packLabel = 'PINT'
+          else if (sampleMethod === '18oz30') packLabel = '18OZ'
+          else if (sampleMethod === 'mightyblue30') packLabel = 'MIGHTY BLUE'
+          else {
+            try {
+              const customs = JSON.parse(localStorage.getItem('bc_custom_methods') || '[]')
+              const match = customs.find(c => c.key === sampleMethod)
+              if (match) { packColor = match.color || '#DB2777'; packLabel = match.label.toUpperCase() }
+            } catch {}
+          }
+          const themed = !!packColor
+          return (
         <div style={{ minHeight: 'calc(100vh - 90px)' }}>
           {/* ===== SAMPLE BOX — Center of attention ===== */}
           <div style={{
@@ -653,66 +925,172 @@ function Dashboard() {
           }}>
             <div style={{
               background: COLORS.bg,
-              border: `2px solid ${COLORS.border2}`,
+              border: themed ? `3px solid ${packColor}` : `2px solid ${COLORS.border2}`,
               borderRadius: 10,
               overflow: 'hidden',
-              boxShadow: '0 2px 12px rgba(0,0,0,0.06)',
+              boxShadow: themed ? `0 2px 20px ${packColor}40` : '0 2px 12px rgba(0,0,0,0.06)',
             }}>
 
-              {/* Pallet identity — compact top bar */}
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: 12,
-                padding: '10px 16px',
-                background: COLORS.bg2, borderBottom: `1px solid ${COLORS.border}`,
-              }}>
-                <div style={{ textAlign: 'center', minWidth: 40 }}>
-                  <div style={{ fontFamily: FONT, fontSize: 8, color: COLORS.text3, letterSpacing: '0.08em' }}>DAILY</div>
-                  <div style={{ fontFamily: FONT, fontSize: 20, fontWeight: 800, color: COLORS.green, lineHeight: 1 }}>#{dailyPalletNum}</div>
+              {/* Pack type banner — colored dot + clean label. Parent box's colored border carries the loud signal. */}
+              {themed && (
+                <div style={{
+                  background: COLORS.bg,
+                  padding: '14px 18px',
+                  borderBottom: `1px solid ${packColor}30`,
+                  display: 'flex', alignItems: 'center', gap: 14,
+                }}>
+                  <span style={{
+                    width: 14, height: 14, borderRadius: '50%',
+                    background: packColor,
+                    boxShadow: `0 0 0 4px ${packColor}22`,
+                    flex: '0 0 auto',
+                  }} />
+                  <span style={{
+                    fontFamily: FONT, fontSize: 22, fontWeight: 700,
+                    color: COLORS.text, letterSpacing: '0.04em',
+                  }}>{packLabel}</span>
+                  <div style={{ flex: 1 }} />
+                  <span style={{
+                    fontFamily: FONT, fontSize: 9, fontWeight: 700,
+                    color: packColor, letterSpacing: '0.18em',
+                    textTransform: 'uppercase',
+                  }}>Active Pack</span>
                 </div>
-                <div style={{ width: 1, height: 28, background: COLORS.border }} />
-                <div style={{ flex: 1, minWidth: 120 }}>
-                  <div style={{ fontFamily: FONT, fontSize: 8, color: COLORS.text3, letterSpacing: '0.08em', marginBottom: 2 }}>PALLET TAG</div>
+              )}
+
+              {/* Line slot switcher — only when dual-line mode is on */}
+              {dualLineMode && (
+                <LineSwitcher
+                  activeLine={activeLine}
+                  lotId={lotId}
+                  counts={counts}
+                  onSwitch={switchLine}
+                />
+              )}
+
+              {/* Pallet identity — Daily # + Tag + Pack Code + layer visual; wraps on narrow */}
+              <div style={{
+                display: 'flex', alignItems: 'stretch', gap: 10,
+                flexWrap: 'wrap',
+                padding: '12px 14px',
+                background: themed ? packColor + '12' : COLORS.bg2,
+                borderBottom: `1px solid ${themed ? packColor + '30' : COLORS.border}`,
+              }}>
+                {/* DAILY PALLET NUMBER card */}
+                <div style={{
+                  flex: '0 0 auto', minWidth: 120,
+                  background: COLORS.bg,
+                  border: `2px solid ${COLORS.green}`,
+                  borderRadius: 8,
+                  padding: '8px 14px',
+                  display: 'flex', flexDirection: 'column', gap: 2,
+                }}>
+                  <div style={{
+                    fontFamily: FONT, fontSize: 9, fontWeight: 700,
+                    color: COLORS.green, letterSpacing: '0.12em',
+                    textTransform: 'uppercase',
+                  }}>Daily Pallet #</div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                    <span style={{
+                      fontFamily: FONT, fontSize: 34, fontWeight: 800,
+                      color: COLORS.green, lineHeight: 1,
+                    }}>#</span>
+                    <input
+                      type="number"
+                      min="1"
+                      value={dailyPalletNum}
+                      onChange={e => setDailyPalletNum(parseInt(e.target.value) || 1)}
+                      style={{
+                        background: 'transparent', border: 'none', padding: 0,
+                        fontFamily: FONT, fontSize: 34, fontWeight: 800,
+                        color: COLORS.green, lineHeight: 1,
+                        width: 80, outline: 'none',
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {/* PALLET TAG card */}
+                <div style={{
+                  flex: '1 1 140px', minWidth: 140,
+                  background: COLORS.bg,
+                  border: `2px solid ${COLORS.border2}`,
+                  borderRadius: 8,
+                  padding: '8px 14px',
+                  display: 'flex', flexDirection: 'column', gap: 2,
+                }}>
+                  <div style={{
+                    fontFamily: FONT, fontSize: 9, fontWeight: 700,
+                    color: COLORS.text3, letterSpacing: '0.12em',
+                    textTransform: 'uppercase',
+                  }}>Pallet Tag</div>
                   <input
                     value={lotId}
                     onChange={e => setLotId(e.target.value)}
-                    placeholder="scan or type"
+                    placeholder="scan or type tag"
                     style={{
-                      background: COLORS.bg3, border: `1px solid ${COLORS.border2}`,
-                      color: COLORS.text, fontFamily: FONT, fontSize: 14, fontWeight: 600,
-                      padding: '5px 10px', borderRadius: 3, outline: 'none',
-                      boxSizing: 'border-box', width: '100%',
+                      background: 'transparent', border: 'none', padding: 0,
+                      color: COLORS.text, fontFamily: FONT, fontSize: 24, fontWeight: 700,
+                      outline: 'none', width: '100%',
                     }}
                   />
                 </div>
-                <div style={{ width: 1, height: 28, background: COLORS.border }} />
-                <div style={{ minWidth: 60 }}>
-                  <div style={{ fontFamily: FONT, fontSize: 8, color: COLORS.text3, letterSpacing: '0.08em', marginBottom: 2 }}>LINE</div>
-                  <input
-                    value={packLine}
-                    onChange={e => setPackLine(e.target.value)}
-                    placeholder="#"
+
+                {/* PACK CODE card — line-specific; defaults to last code used on this line */}
+                <div style={{
+                  flex: '1 1 220px', minWidth: 220,
+                  background: COLORS.bg,
+                  border: `2px solid ${packCode ? COLORS.purple : COLORS.border2}`,
+                  borderRadius: 8,
+                  padding: '8px 14px',
+                  display: 'flex', flexDirection: 'column', gap: 2,
+                }}>
+                  <div style={{
+                    fontFamily: FONT, fontSize: 9, fontWeight: 700,
+                    color: packCode ? COLORS.purple : COLORS.text3,
+                    letterSpacing: '0.12em', textTransform: 'uppercase',
+                  }}>Pack Code</div>
+                  <select
+                    value={packCode}
+                    onChange={e => setPackCode(e.target.value)}
                     style={{
-                      background: COLORS.bg3, border: `1px solid ${COLORS.border2}`,
-                      color: COLORS.text, fontFamily: FONT, fontSize: 14, fontWeight: 600,
-                      padding: '5px 10px', borderRadius: 3, outline: 'none',
-                      boxSizing: 'border-box', width: '100%',
+                      background: 'transparent', border: 'none', padding: 0,
+                      fontFamily: FONT,
+                      fontSize: packCode ? 18 : 14, fontWeight: 700,
+                      color: packCode ? COLORS.text : COLORS.text3,
+                      outline: 'none', width: '100%', cursor: 'pointer',
+                      appearance: 'none', WebkitAppearance: 'none', MozAppearance: 'none',
                     }}
+                  >
+                    <option value="">Select pack code…</option>
+                    {packFavorites.length > 0 && (
+                      <optgroup label="★ Favorites">
+                        {packCodeDB.filter(c => packFavorites.includes(c.code)).map(c => (
+                          <option key={c.code} value={c.code}>{c.code} — {c.desc}</option>
+                        ))}
+                      </optgroup>
+                    )}
+                    <optgroup label={packFavorites.length > 0 ? 'All Codes' : 'Pack Codes'}>
+                      {packCodeDB.filter(c => !packFavorites.includes(c.code)).map(c => (
+                        <option key={c.code} value={c.code}>{c.code} — {c.desc}</option>
+                      ))}
+                    </optgroup>
+                  </select>
+                </div>
+
+                {/* Layer visual — always visible, correlated with daily pallet # */}
+                <div style={{ flex: '0 0 170px', display: 'flex', alignItems: 'stretch' }}>
+                  <PalletLayers
+                    dailyPalletNum={dailyPalletNum}
+                    history={history}
+                    gradingStandard={gradingStandard}
+                    onSkipToLayer={skipToLayer}
+                    onUnskipLayer={unskipLayer}
+                    onEditSample={setEditingSample}
+                    compact={palletLayersCompact}
+                    onToggleCompact={() => setPalletLayersCompact(v => !v)}
                   />
                 </div>
-                {(() => {
-                  const officialCount = lotId ? history.filter(s => s.lotId === lotId && !s.isExtra).length : 0
-                  if (!lotId) return null
-                  const layerNames = { 0: '#1 BOTTOM', 1: '#2 MIDDLE', 2: '#3 TOP' }
-                  return (
-                    <div style={{
-                      fontFamily: FONT, fontSize: 12, fontWeight: 700,
-                      color: officialCount >= 3 ? COLORS.amber : COLORS.green,
-                      letterSpacing: '0.04em', whiteSpace: 'nowrap',
-                    }}>
-                      {officialCount >= 3 ? '3/3 DONE' : `NEXT: ${layerNames[officialCount]}`}
-                    </div>
-                  )
-                })()}
               </div>
 
               {/* Receipt context — thin strip when set */}
@@ -728,24 +1106,28 @@ function Dashboard() {
                 </div>
               )}
 
-              {/* Live grade display — integrated in card */}
-              <div style={{ padding: '10px 16px', borderBottom: `1px solid ${COLORS.border}` }}>
-                <ScoreDisplay counts={counts} packCriteria={packCriteria} tolerances={GRADING_STANDARDS[gradingStandard].tolerances} />
-              </div>
+              {/* Live grade display — integrated in card; hidden in box-weight mode (no grade in that flow) */}
+              {!boxWeightMode && (
+                <div style={{ padding: '10px 16px', borderBottom: `1px solid ${COLORS.border}` }}>
+                  <ScoreDisplay counts={counts} packCriteria={packCriteria} tolerances={GRADING_STANDARDS[gradingStandard].tolerances} />
+                </div>
+              )}
 
               {/* Tools row — camera, scale, logs */}
               <div style={{
                 display: 'flex', gap: 6, padding: '8px 16px',
                 borderBottom: `1px solid ${COLORS.border}`,
               }}>
-                <button onClick={() => setShowCameraPanel(p => !p)} style={{
-                  fontFamily: FONT, fontSize: 9, fontWeight: 600,
-                  color: graderConnected ? COLORS.green : COLORS.text3,
-                  background: showCameraPanel ? COLORS.bg3 : 'transparent',
-                  border: `1px solid ${graderConnected ? COLORS.green : COLORS.border}`,
-                  padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
-                  letterSpacing: '0.06em',
-                }}>CAMERA {graderConnected ? '\u25cf' : ''}</button>
+                {!boxWeightMode && (
+                  <button onClick={() => setShowCameraPanel(p => !p)} style={{
+                    fontFamily: FONT, fontSize: 9, fontWeight: 600,
+                    color: graderConnected ? COLORS.green : COLORS.text3,
+                    background: showCameraPanel ? COLORS.bg3 : 'transparent',
+                    border: `1px solid ${graderConnected ? COLORS.green : COLORS.border}`,
+                    padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
+                    letterSpacing: '0.06em',
+                  }}>CAMERA {graderConnected ? '\u25cf' : ''}</button>
+                )}
                 <button onClick={() => setShowScalePanel(p => !p)} style={{
                   fontFamily: FONT, fontSize: 9, fontWeight: 600,
                   color: scaleConnected ? COLORS.green : COLORS.text3,
@@ -754,37 +1136,45 @@ function Dashboard() {
                   padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
                   letterSpacing: '0.06em',
                 }}>SCALE {scaleConnected ? '\u25cf' : ''}</button>
-                <div style={{ flex: 1 }} />
-                <button onClick={() => setShowLogManager(true)} style={{
-                  fontFamily: FONT, fontSize: 9, fontWeight: 600,
-                  color: COLORS.amber, background: 'transparent',
-                  border: `1px solid ${COLORS.amberDim}`,
+                <button
+                  onClick={() => { setBoxWeightMode(v => !v); if (boxWeightMode) setBoxWeights([]) }}
+                  style={{
+                    fontFamily: FONT, fontSize: 9, fontWeight: 700,
+                    color: boxWeightMode ? '#fff' : COLORS.amber,
+                    background: boxWeightMode ? COLORS.amber : 'transparent',
+                    border: `1px solid ${COLORS.amber}`,
+                    padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
+                    letterSpacing: '0.06em',
+                  }}>BOX WEIGHT {boxWeightMode ? '\u25cf' : ''}</button>
+                <button onClick={() => setShowAssignTag(true)} style={{
+                  fontFamily: FONT, fontSize: 9, fontWeight: 700,
+                  color: COLORS.purple, background: 'transparent',
+                  border: `1px solid ${COLORS.purple}`,
                   padding: '4px 10px', borderRadius: 3, cursor: 'pointer',
                   letterSpacing: '0.06em',
+                }}>ASSIGN TAG</button>
+                <div style={{ flex: 1 }} />
+                <button onClick={() => setShowLogManager(true)} style={{
+                  fontFamily: FONT, fontSize: 11, fontWeight: 700,
+                  color: '#fff', background: COLORS.amber,
+                  border: `1px solid ${COLORS.amber}`,
+                  padding: '6px 14px', borderRadius: 4, cursor: 'pointer',
+                  letterSpacing: '0.08em',
+                  boxShadow: `0 1px 2px ${COLORS.amber}40`,
                 }}>LOGS</button>
               </div>
 
-              {/* Camera panel — expandable */}
-              {showCameraPanel && (
+              {/* Camera panel — expandable; hidden in box-weight mode */}
+              {showCameraPanel && !boxWeightMode && (
                 <div style={{ padding: '8px 16px', borderBottom: `1px solid ${COLORS.border}`, background: COLORS.bg2 }}>
                   <CameraTuner
                     wsRef={wsRef}
+                    relayConnected={connected}
                     graderConnected={graderConnected}
                     onUseCount={(countOrObj) => {
-                      if (typeof countOrObj === 'object' && countOrObj.zones) {
-                        // Zone-aware count — auto-populate defects
-                        const { total, zones } = countOrObj
-                        setCounts(prev => ({
-                          ...prev,
-                          _fullcountTotal: total,
-                          _source: 'grader',
-                          scars: (prev.scars || 0) + (zones.scars || 0),
-                          condition: (prev.condition || 0) + (zones.condition || 0),
-                          greenRed: (prev.greenRed || 0) + (zones.greenRed || 0),
-                        }))
-                      } else {
-                        setCounts(prev => ({ ...prev, _fullcountTotal: countOrObj, _source: 'grader' }))
-                      }
+                      const total = (typeof countOrObj === 'object' && countOrObj !== null)
+                        ? countOrObj.total : countOrObj
+                      setCounts(prev => ({ ...prev, _fullcountTotal: total, _source: 'grader' }))
                       if (sampleMethod !== 'fullcount' && sampleMethod !== 'pint') setSampleMethod('fullcount')
                     }}
                   />
@@ -796,14 +1186,6 @@ function Dashboard() {
                         padding: '8px', borderRadius: 4, cursor: 'pointer',
                         letterSpacing: '0.06em', textAlign: 'center',
                       }}>PHONE CAMERA</button>
-                      <button onClick={() => {
-                        fetch('/api/restart-camera', { method: 'POST' }).catch(() => {})
-                      }} style={{
-                        flex: 1, fontFamily: FONT, fontSize: 10, color: COLORS.text3,
-                        background: COLORS.bg, border: `1px solid ${COLORS.border}`,
-                        padding: '8px', borderRadius: 4, cursor: 'pointer',
-                        letterSpacing: '0.06em', textAlign: 'center',
-                      }}>COUNTING CAMERA</button>
                     </div>
                   )}
                 </div>
@@ -829,8 +1211,8 @@ function Dashboard() {
                 </div>
               )}
 
-              {/* Incoming image from phone — shows when received */}
-              {incomingImage && (
+              {/* Incoming image from phone — shows when received; hidden in box-weight mode */}
+              {incomingImage && !boxWeightMode && (
                 <div style={{ padding: '8px 16px', borderBottom: `1px solid ${COLORS.border}`, background: COLORS.bg2 }}>
                   <div style={{
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -880,21 +1262,45 @@ function Dashboard() {
               )}
 
               {/* COUNT ENTRY — The main event */}
+              {boxWeightMode ? (
+                <BoxWeightEntry
+                  weights={boxWeights}
+                  setWeights={setBoxWeights}
+                  tolerance={boxTolerance}
+                  setTolerance={setBoxTolerance}
+                  activeMethod={sampleMethod}
+                  onSetMethod={setSampleMethod}
+                  onSave={logBoxWeightSample}
+                  onCancel={() => { setBoxWeightMode(false); setBoxWeights([]) }}
+                />
+              ) : (
               <div style={{ padding: '12px 16px' }}>
                 <CountEntry
                   counts={counts} setCounts={setCounts}
                   detailed={detailedCounts}
                   onToggleDetailed={() => setDetailedCounts(!detailedCounts)}
                   sampleMethod={sampleMethod}
-                  onToggleMethod={() => setSampleMethod(prev => prev === 'fullcount' ? 'pint' : prev === 'pint' ? '600g' : prev === '600g' ? 'manual' : 'fullcount')}
+                  onToggleMethod={() => setSampleMethod(prev =>
+                    prev === 'fullcount' ? 'pint'
+                    : prev === 'pint' ? 'pint30'
+                    : prev === 'pint30' ? '18oz30'
+                    : prev === '18oz30' ? 'mightyblue30'
+                    : prev === 'mightyblue30' ? '600g'
+                    : prev === '600g' ? 'manual'
+                    : 'fullcount'
+                  )}
                   onSetMethod={setSampleMethod}
                   gradingStandard={gradingStandard}
                   onToggleStandard={() => setGradingStandard(prev => prev === 'mbg' ? 'butterfly' : 'mbg')}
                   onShowGradingGuide={() => setShowGradingGuide(true)}
+                  dualLineMode={dualLineMode}
+                  onToggleDualLineMode={() => setDualLineMode(v => !v)}
                 />
               </div>
+              )}
 
-              {/* Action buttons */}
+              {/* Action buttons — hidden in box-weight mode (has its own save) */}
+              {!boxWeightMode && (
               <div style={{ display: 'flex', gap: 8, padding: '0 16px 12px' }}>
                 <button onClick={() => {
                   setCounts({ good: 0, permanent: 0, condition: 0, decay: 0 })
@@ -915,9 +1321,10 @@ function Dashboard() {
                   padding: 14, borderRadius: 4, cursor: 'pointer',
                 }}>
                   {(() => {
-                    const oc = history.filter(s => s.lotId === lotId && !s.isExtra).length
+                    const td = new Date().toLocaleDateString()
+                    const oc = history.filter(s => s.dailyPalletNum === dailyPalletNum && s.date === td && !s.isExtra).length
                     const ln = { 0: 'LOG BOTTOM', 1: 'LOG MIDDLE', 2: 'LOG TOP' }
-                    return oc < 3 && lotId ? ln[oc] : 'LOG SAMPLE'
+                    return oc < 3 ? ln[oc] : 'LOG SAMPLE'
                   })()}
                 </button>
                 <button onClick={logExtraSample} style={{
@@ -928,6 +1335,7 @@ function Dashboard() {
                   padding: 14, borderRadius: 4, cursor: 'pointer',
                 }}>EXTRA</button>
               </div>
+              )}
 
               {/* Static reminder */}
               <div style={{
@@ -1137,7 +1545,8 @@ function Dashboard() {
                 </div>
                 <div style={{ flex: 1 }} />
                 {(() => {
-                  const officialCount = lotId ? history.filter(s => s.lotId === lotId && !s.isExtra).length : 0
+                  const td = new Date().toLocaleDateString()
+                  const officialCount = history.filter(s => s.dailyPalletNum === dailyPalletNum && s.date === td && !s.isExtra).length
                   const layerNames = { 0: '#1 BOTTOM', 1: '#2 MIDDLE', 2: '#3 TOP' }
                   return (
                     <div style={{ fontFamily: FONT, fontSize: 11, display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1170,29 +1579,74 @@ function Dashboard() {
             <LotSummary lotId={lotId} history={history} />
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
               <ShareButton label="Share QC Data" getSnapshot={() => {
-                const gradeResult = gradeSample(counts, GRADING_STANDARDS[gradingStandard].tolerances)
-                const lotSamples = history.filter(s => s.lotId === lotId)
+                // Decide what to share: in-progress sample if counts non-zero, else latest sample
+                const hasCurrent = (counts.good || counts.permanent || counts.condition || counts.decay) > 0
+                const today = new Date().toLocaleDateString()
+                const todaySamples = history.filter(s => s.date === today)
+                const latestSample = [...todaySamples].reverse().find(s => !s.isSkipped) || history.slice(-1)[0] || null
+                const activeSample = hasCurrent
+                  ? { ...counts, _sampleMethod: sampleMethod, _gradingStandard: gradingStandard,
+                      lotId, dailyPalletNum, packLine, receiptNum, grower, variety, packCriteria,
+                      time: new Date().toLocaleTimeString('en-US', { hour12: false }) }
+                  : latestSample
+
+                const tol = (activeSample && GRADING_STANDARDS[activeSample._gradingStandard])
+                  ? GRADING_STANDARDS[activeSample._gradingStandard].tolerances
+                  : GRADING_STANDARDS[gradingStandard].tolerances
+                const isBox = activeSample && activeSample._sampleMethod === 'boxweight'
+                const gradeResult = (!activeSample || isBox)
+                  ? { grade: 'none', label: '—', status: 'none', pctCombined: 0, pctPermanent: 0, pctCondition: 0, pctDecay: 0, total: 0, score: 0 }
+                  : gradeSample(activeSample, tol)
+
+                const focusLot = (activeSample?.lotId) || lotId || ''
+                const focusPallet = (activeSample?.dailyPalletNum) || dailyPalletNum
+                const lotSamples = history.filter(s => s.lotId === focusLot && s.date === today)
                 const official = lotSamples.filter(s => !s.isExtra && !s.isSkipped)
                 const packLog = JSON.parse(localStorage.getItem('bc_packlog') || '[]')
-                const today = new Date().toLocaleDateString()
                 const todayLog = packLog.filter(e => e.date === today)
+
+                const boxPayload = isBox ? {
+                  weights: activeSample._boxWeights || [],
+                  mean: activeSample._boxMean || 0,
+                  min: activeSample._boxMin || 0,
+                  max: activeSample._boxMax || 0,
+                  count: activeSample._boxCount || 0,
+                  inSpec: activeSample._boxInSpec || 0,
+                  under: activeSample._boxUnder || 0,
+                  over: activeSample._boxOver || 0,
+                  pctInSpec: activeSample._boxPctInSpec || 0,
+                  labelWeight: activeSample._boxLabelWeight || 0,
+                  tolerance: activeSample._boxTolerance || 0,
+                } : null
+
                 return {
-                  type: 'grade',
-                  lotId, dailyPalletNum, packLine, receiptNum, grower, variety, packCriteria,
+                  type: isBox ? 'box' : 'grade',
+                  lotId: focusLot,
+                  dailyPalletNum: focusPallet,
+                  packLine: activeSample?.packLine || packLine,
+                  receiptNum: activeSample?.receiptNum || receiptNum,
+                  grower: activeSample?.grower || grower,
+                  variety: activeSample?.variety || variety,
+                  packCriteria: activeSample?.packCriteria || packCriteria,
+                  sampleMethod: activeSample?._sampleMethod || sampleMethod,
+                  time: activeSample?.time,
                   grade: gradeResult,
+                  box: boxPayload,
+                  clamshellNet: activeSample?._clamshellNet,
+                  clamshellLabel: activeSample?._clamshellLabel,
                   views: {
-                    grade: { grade: gradeResult },
+                    grade: { grade: gradeResult, box: boxPayload },
                     lotSummary: {
                       lotSummary: {
-                        lotId,
+                        lotId: focusLot,
                         sampleCount: official.length,
-                        grade: official.length > 0 ? gradeSample(averageCounts(official), GRADING_STANDARDS[gradingStandard].tolerances) : null,
-                        pctCombined: official.length > 0 ? gradeSample(averageCounts(official), GRADING_STANDARDS[gradingStandard].tolerances).pctCombined : 0,
+                        grade: official.length > 0 ? gradeSample(averageCounts(official), tol) : null,
+                        pctCombined: official.length > 0 ? gradeSample(averageCounts(official), tol).pctCombined : 0,
                         samples: [1,2,3].map(n => {
                           const s = lotSamples.find(x => x.sampleNum === n)
                           if (!s) return { layer: ['BTM','MID','TOP'][n-1], isSkipped: true }
                           if (s.isSkipped) return { layer: ['BTM','MID','TOP'][n-1], isSkipped: true }
-                          return { layer: ['BTM','MID','TOP'][n-1], grade: gradeSample(s, GRADING_STANDARDS[gradingStandard].tolerances).label }
+                          return { layer: ['BTM','MID','TOP'][n-1], grade: gradeSample(s, tol).label }
                         }),
                       },
                     },
@@ -1207,10 +1661,11 @@ function Dashboard() {
                 }
               }} />
             </div>
-            <SampleHistory history={history} onClear={clearHistory} />
+            <SampleHistory history={history} onClear={clearHistory} onEdit={setEditingSample} />
           </div>
         </div>
-
+        )
+        })()
       ) : (
         /* ========== OPS MODE ========== */
         <div style={{
@@ -1233,7 +1688,7 @@ function Dashboard() {
             features.packout !== false && { label: 'PACKOUT', onClick: () => setShowPackout(true) },
             { label: 'ACCURACY', onClick: () => setShowAccuracy(true) },
           ].filter(Boolean)}>
-            <SampleHistory history={history} onClear={clearHistory} />
+            <SampleHistory history={history} onClear={clearHistory} onEdit={setEditingSample} />
             <LotSummary lotId={lotId} history={history} />
             {(features.speedQuality !== false || features.growerTrends !== false) && (
               <GrowerFilter history={history}>
@@ -1251,6 +1706,7 @@ function Dashboard() {
           <OpsSection title="Records" actions={[
             { label: 'CHEMICALS', onClick: () => setShowChemicals(true) },
             { label: 'CHEM LOG', onClick: () => setShowChemLog(true) },
+            { label: 'CALC', onClick: () => setShowSanitizerCalc(true) },
             features.logManager !== false && { label: 'LOGS', onClick: () => setShowLogManager(true) },
           ].filter(Boolean)}>
           </OpsSection>
@@ -1298,6 +1754,15 @@ function Dashboard() {
             serverSave('bc_history', h)
           }}
           onClose={() => setShowLogManager(false)}
+        />
+      )}
+
+      {/* Pallet tag assign overlay */}
+      {showAssignTag && (
+        <PalletTagAssign
+          history={history}
+          onAssign={assignPalletTag}
+          onClose={() => setShowAssignTag(false)}
         />
       )}
 
@@ -1392,6 +1857,10 @@ function Dashboard() {
         <ChemicalLog onClose={() => setShowChemLog(false)} />
       )}
 
+      {showSanitizerCalc && (
+        <SanitizerCalculator onClose={() => setShowSanitizerCalc(false)} />
+      )}
+
       {showPhoneQR && (
         <PhoneQROverlay onClose={() => setShowPhoneQR(false)} />
       )}
@@ -1407,6 +1876,978 @@ function Dashboard() {
         />
       )}
 
+      {editingSample && (
+        editingSample._sampleMethod === 'boxweight' ? (
+          <BoxSampleEditor
+            sample={editingSample}
+            history={history}
+            onSave={(patch) => { updateSample(editingSample.id, patch); setEditingSample(null) }}
+            onDelete={() => { deleteSample(editingSample.id); setEditingSample(null) }}
+            onClose={() => setEditingSample(null)}
+          />
+        ) : (
+          <SampleEditor
+            sample={editingSample}
+            history={history}
+            gradingStandard={gradingStandard}
+            onSave={(patch) => { updateSample(editingSample.id, patch); setEditingSample(null) }}
+            onDelete={() => { deleteSample(editingSample.id); setEditingSample(null) }}
+            onClose={() => setEditingSample(null)}
+          />
+        )
+      )}
+
+    </div>
+  )
+}
+
+function PalletLayers({ dailyPalletNum, history, gradingStandard, onSkipToLayer, onUnskipLayer, onEditSample, compact, onToggleCompact }) {
+  const layers = [3, 2, 1] // display top to bottom
+  const layerNames = { 1: 'BOTTOM', 2: 'MIDDLE', 3: 'TOP' }
+  // Correlate with today's daily pallet # — pallet tag can be blank while layers show
+  const today = new Date().toLocaleDateString()
+  const lotSamples = history.filter(s =>
+    s.dailyPalletNum === dailyPalletNum &&
+    s.date === today &&
+    !s.isExtra
+  )
+
+  const layerState = (n) => {
+    const sample = lotSamples.find(s => s.sampleNum === n)
+    if (!sample) return { state: 'empty', sample: null }
+    if (sample.isSkipped) return { state: 'skipped', sample }
+    return { state: 'sampled', sample }
+  }
+
+  // NEXT = lowest-numbered empty layer (handles out-of-order states)
+  const nextLayer = [1, 2, 3].find(n => layerState(n).state === 'empty') || null
+
+  const renderLayer = (n) => {
+    const { state, sample } = layerState(n)
+    const isNext = n === nextLayer
+    let label, bg, textColor, borderColor, indicator, title, onClick
+
+    if (state === 'sampled') {
+      const result = gradeSample(sample, (GRADING_STANDARDS[sample._gradingStandard] || GRADING_STANDARDS[gradingStandard] || GRADING_STANDARDS.mbg).tolerances)
+      const gradeColor = result.status === 'excellent' || result.status === 'ok' ? COLORS.green
+        : result.status === 'warn' ? COLORS.amber
+        : result.status === 'fail' ? COLORS.red
+        : COLORS.text3
+      label = result.label
+      bg = gradeColor + '18'
+      textColor = gradeColor
+      borderColor = gradeColor + '60'
+      indicator = '●'
+      title = `Layer #${n} ${layerNames[n]} — ${result.label} — tap to edit or reassign`
+      onClick = () => onEditSample && onEditSample(sample)
+    } else if (state === 'skipped') {
+      label = 'SKIP'
+      bg = COLORS.bg3
+      textColor = COLORS.text3
+      borderColor = COLORS.border
+      indicator = '✕'
+      title = `Layer #${n} ${layerNames[n]} skipped — tap to undo`
+      onClick = () => onUnskipLayer(n)
+    } else {
+      label = isNext ? 'NEXT' : 'TAP'
+      bg = isNext ? COLORS.green + '15' : COLORS.bg
+      textColor = isNext ? COLORS.green : COLORS.text3
+      borderColor = isNext ? COLORS.green : COLORS.border
+      indicator = isNext ? '▸' : ''
+      title = `Tap to sample layer #${n} ${layerNames[n]}${!isNext ? ' (skips earlier empty layers)' : ''}`
+      onClick = () => onSkipToLayer(n)
+    }
+
+    if (compact) {
+      // Flat menu — short pills in a vertical stack with abbreviated labels
+      return (
+        <button
+          key={n}
+          type="button"
+          disabled={!onClick}
+          onClick={onClick || undefined}
+          title={title}
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            gap: 4, padding: '4px 8px',
+            background: bg, color: textColor,
+            border: `1px solid ${borderColor}`,
+            borderRadius: 3,
+            fontFamily: FONT, fontSize: 10, fontWeight: 700,
+            letterSpacing: '0.04em',
+            cursor: onClick ? 'pointer' : 'default',
+            width: '100%',
+            textDecoration: state === 'skipped' ? 'line-through' : 'none',
+          }}
+        >
+          <span style={{ opacity: 0.7, fontSize: 9 }}>#{n}</span>
+          <span style={{ fontWeight: 800, textDecoration: 'none', fontSize: 11 }}>
+            {indicator && <span style={{ marginRight: 3 }}>{indicator}</span>}
+            {label}
+          </span>
+        </button>
+      )
+    }
+
+    // Illustrative — bigger, with full layer name
+    return (
+      <button
+        key={n}
+        type="button"
+        disabled={!onClick}
+        onClick={onClick || undefined}
+        title={title}
+        style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          gap: 8, padding: '8px 12px',
+          background: bg, color: textColor,
+          border: `1px solid ${borderColor}`,
+          borderRadius: 4,
+          fontFamily: FONT, fontSize: 10, fontWeight: 700,
+          letterSpacing: '0.04em',
+          cursor: onClick ? 'pointer' : 'default',
+          width: '100%',
+          textDecoration: state === 'skipped' ? 'line-through' : 'none',
+        }}
+      >
+        <span style={{ opacity: 0.85, fontSize: 9, letterSpacing: '0.06em' }}>#{n} {layerNames[n]}</span>
+        <span style={{ fontWeight: 800, textDecoration: 'none', fontSize: 12 }}>
+          {indicator && <span style={{ marginRight: 4 }}>{indicator}</span>}
+          {label}
+        </span>
+      </button>
+    )
+  }
+
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', gap: compact ? 2 : 4,
+      width: '100%', position: 'relative',
+    }}>
+      {layers.map(renderLayer)}
+      {onToggleCompact && (
+        <button
+          type="button"
+          onClick={onToggleCompact}
+          title={compact ? 'Switch to illustrative layout' : 'Switch to flat menu layout'}
+          style={{
+            position: 'absolute', top: -4, right: -4,
+            width: 16, height: 16, padding: 0,
+            background: COLORS.bg2, color: COLORS.text3,
+            border: `1px solid ${COLORS.border}`,
+            borderRadius: 3, cursor: 'pointer',
+            fontFamily: FONT, fontSize: 9, lineHeight: 1,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+        >{compact ? '☷' : '≡'}</button>
+      )}
+    </div>
+  )
+}
+
+function BoxSampleEditor({ sample, history, onSave, onDelete, onClose }) {
+  const [dailyPalletNum, setDailyPalletNum] = React.useState(sample.dailyPalletNum || 1)
+  const [packLine, setPackLine] = React.useState(sample.packLine || '')
+  const [lotId, setLotId] = React.useState(sample.lotId || '')
+  const [weights, setWeights] = React.useState(
+    Array.isArray(sample._boxWeights) ? [...sample._boxWeights] : []
+  )
+  const [labelWeight, setLabelWeight] = React.useState(sample._boxLabelWeight || 302)
+  const [tolerance, setTolerance] = React.useState(sample._boxTolerance || 5)
+  const [confirmDelete, setConfirmDelete] = React.useState(false)
+  const [newWeight, setNewWeight] = React.useState('')
+
+  // Recompute stats live using pack-tolerance rules (green/yellow/red)
+  const rules = React.useMemo(() => loadPackTolerance(), [])
+  const count = weights.length
+  const mean = count > 0 ? weights.reduce((a, b) => a + b, 0) / count : 0
+  const min = count > 0 ? Math.min(...weights) : 0
+  const max = count > 0 ? Math.max(...weights) : 0
+  const classes = weights.map(w => classifyWeight(w, labelWeight, rules))
+  const inSpec = classes.filter(c => c === 'green').length
+  const under = weights.filter(w => w < labelWeight - labelWeight * rules.greenPct / 100).length
+  const over = classes.filter(c => c === 'red').length
+  const pctInSpec = count > 0 ? (inSpec / count) * 100 : 0
+  const passColor = pctInSpec >= 95 ? COLORS.green : pctInSpec >= 85 ? COLORS.amber : COLORS.red
+  const passLabel = count === 0 ? '—' : pctInSpec >= 95 ? 'PASS' : pctInSpec >= 85 ? 'BORDERLINE' : 'FAIL'
+  const accent = (sample._sampleMethod === 'boxweight' && labelWeight > 450) ? '#EA580C' : '#1E40AF'
+
+  const addWeight = () => {
+    const n = parseFloat(newWeight)
+    if (!n || n <= 0) return
+    setWeights([...weights, n])
+    setNewWeight('')
+  }
+  const removeWeightAt = (idx) => setWeights(weights.filter((_, i) => i !== idx))
+  const editWeightAt = (idx, val) => {
+    const n = parseFloat(val)
+    setWeights(weights.map((w, i) => i === idx ? (isNaN(n) ? 0 : n) : w))
+  }
+
+  const save = () => {
+    onSave({
+      dailyPalletNum: parseInt(dailyPalletNum) || 1,
+      packLine,
+      lotId,
+      _boxWeights: weights,
+      _boxLabelWeight: labelWeight,
+      _boxTolerance: tolerance,
+      _boxCount: count,
+      _boxMean: mean,
+      _boxMin: min,
+      _boxMax: max,
+      _boxInSpec: inSpec,
+      _boxUnder: under,
+      _boxOver: over,
+      _boxPctInSpec: pctInSpec,
+    })
+  }
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 3000,
+      background: 'rgba(0,0,0,0.55)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+    }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background: '#fff', borderRadius: 10, padding: 20,
+        maxWidth: 520, width: '100%', maxHeight: '90vh', overflowY: 'auto',
+        border: `2px solid ${accent}`,
+      }}>
+        <div style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12,
+        }}>
+          <div>
+            <div style={{
+              fontFamily: FONT, fontSize: 14, fontWeight: 800, color: COLORS.text,
+              letterSpacing: '0.04em',
+            }}>Edit Box Sample</div>
+            <div style={{
+              fontFamily: FONT, fontSize: 10, color: COLORS.text3, marginTop: 2,
+            }}>
+              {sample.date} · {sample.time} · id {String(sample.id).slice(-6)}
+            </div>
+          </div>
+          <div style={{
+            fontFamily: FONT, fontSize: 16, fontWeight: 800, color: passColor,
+            padding: '4px 12px', borderRadius: 4,
+            background: passColor + '15', border: `1px solid ${passColor}60`,
+          }}>{passLabel}{count > 0 ? ` ${pctInSpec.toFixed(0)}%` : ''}</div>
+        </div>
+
+        {/* Reassign — PRIMARY USE */}
+        <div style={{
+          padding: 12, marginBottom: 12,
+          background: accent + '08', border: `2px solid ${accent}`, borderRadius: 6,
+        }}>
+          <div style={{
+            fontFamily: FONT, fontSize: 10, fontWeight: 700, color: accent,
+            textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8,
+          }}>Reassign Line / Pallet</div>
+          <div style={{ display: 'flex', gap: 10, marginBottom: 8 }}>
+            <label style={{ flex: 1, fontFamily: FONT, fontSize: 10, color: COLORS.text3 }}>
+              Daily Pallet #
+              <input type="number" min="1" value={dailyPalletNum}
+                onChange={e => setDailyPalletNum(e.target.value)}
+                style={{
+                  display: 'block', width: '100%', marginTop: 3, padding: '8px 10px',
+                  fontFamily: FONT, fontSize: 20, fontWeight: 800, color: accent,
+                  border: `1px solid ${accent}60`, borderRadius: 4, outline: 'none',
+                  boxSizing: 'border-box', background: '#fff',
+                }}
+              />
+            </label>
+            <label style={{ flex: 1, fontFamily: FONT, fontSize: 10, color: COLORS.text3 }}>
+              Line
+              <input value={packLine}
+                onChange={e => setPackLine(e.target.value)}
+                placeholder="1 / 2 / name"
+                style={{
+                  display: 'block', width: '100%', marginTop: 3, padding: '8px 10px',
+                  fontFamily: FONT, fontSize: 18, fontWeight: 700, color: COLORS.text,
+                  border: `1px solid ${accent}60`, borderRadius: 4, outline: 'none',
+                  boxSizing: 'border-box', background: '#fff',
+                }}
+              />
+            </label>
+          </div>
+          <label style={{ fontFamily: FONT, fontSize: 10, color: COLORS.text3 }}>
+            Pallet Tag (optional)
+            <input value={lotId} onChange={e => setLotId(e.target.value)}
+              placeholder="scan or type"
+              style={{
+                display: 'block', width: '100%', marginTop: 3, padding: '6px 8px',
+                fontFamily: FONT, fontSize: 13, color: COLORS.text,
+                border: `1px solid ${COLORS.border}`, borderRadius: 3, outline: 'none',
+                boxSizing: 'border-box',
+              }}
+            />
+          </label>
+        </div>
+
+        {/* Spec settings */}
+        <div style={{
+          padding: 10, marginBottom: 12,
+          background: COLORS.bg2, border: `1px solid ${COLORS.border}`, borderRadius: 4,
+          display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap',
+        }}>
+          <label style={{ fontFamily: FONT, fontSize: 10, color: COLORS.text3 }}>
+            Label (g)
+            <input type="number" min="0" value={labelWeight}
+              onChange={e => setLabelWeight(parseFloat(e.target.value) || 0)}
+              style={{
+                display: 'block', marginTop: 3, padding: '4px 8px', width: 70,
+                fontFamily: FONT, fontSize: 14, fontWeight: 700, color: accent,
+                border: `1px solid ${accent}60`, borderRadius: 3, outline: 'none',
+              }}
+            />
+          </label>
+          <label style={{ fontFamily: FONT, fontSize: 10, color: COLORS.text3 }}>
+            Tolerance ±(g)
+            <input type="number" min="0" step="0.1" value={tolerance}
+              onChange={e => setTolerance(parseFloat(e.target.value) || 0)}
+              style={{
+                display: 'block', marginTop: 3, padding: '4px 8px', width: 60,
+                fontFamily: FONT, fontSize: 14, fontWeight: 700, color: COLORS.text,
+                border: `1px solid ${COLORS.border2}`, borderRadius: 3, outline: 'none',
+              }}
+            />
+          </label>
+          <div style={{ flex: 1 }} />
+          <div style={{ fontFamily: FONT, fontSize: 10, color: COLORS.text3 }}>
+            μ <b style={{ color: COLORS.text }}>{mean.toFixed(1)}g</b>
+            {'  '}N <b style={{ color: COLORS.text }}>{count}</b>
+            {under > 0 && <span>{'  '}↓<b style={{ color: COLORS.red }}>{under}</b></span>}
+            {over > 0 && <span>{'  '}↑<b style={{ color: COLORS.amber }}>{over}</b></span>}
+          </div>
+        </div>
+
+        {/* Weight list — edit individual entries */}
+        <div style={{ marginBottom: 12 }}>
+          <div style={{
+            fontFamily: FONT, fontSize: 10, fontWeight: 700, color: COLORS.text3,
+            textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6,
+            display: 'flex', alignItems: 'center', gap: 8,
+          }}>
+            Weights
+            <span style={{ color: COLORS.text3, fontWeight: 400, textTransform: 'none' }}>
+              edit or remove any entry
+            </span>
+          </div>
+          <div style={{
+            maxHeight: 200, overflowY: 'auto',
+            border: `1px solid ${COLORS.border}`, borderRadius: 4,
+          }}>
+            {weights.length === 0 ? (
+              <div style={{
+                padding: 12, textAlign: 'center',
+                fontFamily: FONT, fontSize: 10, color: COLORS.text3,
+              }}>No weights in this box sample</div>
+            ) : weights.map((w, i) => {
+              const cls = classifyWeight(w, labelWeight, rules)
+              const isUnder = w < labelWeight - labelWeight * rules.greenPct / 100
+              const c = CLASS_COLORS[cls]
+              const inSp = cls === 'green'
+              return (
+                <div key={i} style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '4px 8px',
+                  borderBottom: i < weights.length - 1 ? `1px solid ${COLORS.border}` : 'none',
+                  background: i % 2 === 0 ? COLORS.bg : COLORS.bg2,
+                }}>
+                  <span style={{ fontFamily: FONT, fontSize: 9, color: COLORS.text3, width: 24 }}>#{i + 1}</span>
+                  <input type="number" min="0" step="0.1" value={w}
+                    onChange={e => editWeightAt(i, e.target.value)}
+                    style={{
+                      fontFamily: FONT, fontSize: 12, fontWeight: 700, color: c,
+                      background: '#fff', border: `1px solid ${c}40`,
+                      borderRadius: 3, padding: '3px 6px', width: 80, outline: 'none',
+                    }}
+                  />
+                  <span style={{ fontFamily: FONT, fontSize: 9, color: c, letterSpacing: '0.04em', fontWeight: 600 }}>
+                    {inSp ? 'IN SPEC' : isUnder ? 'UNDER' : 'OVER'}
+                  </span>
+                  <div style={{ flex: 1 }} />
+                  <button onClick={() => removeWeightAt(i)} style={{
+                    fontFamily: FONT, fontSize: 9, color: COLORS.red,
+                    background: 'transparent', border: `1px solid ${COLORS.red}40`,
+                    padding: '2px 8px', borderRadius: 2, cursor: 'pointer',
+                  }}>×</button>
+                </div>
+              )
+            })}
+          </div>
+          {/* Add more */}
+          <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+            <input type="number" min="0" step="0.1" value={newWeight}
+              onChange={e => setNewWeight(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') addWeight() }}
+              placeholder="add weight (g)"
+              style={{
+                flex: 1, padding: '6px 10px',
+                fontFamily: FONT, fontSize: 13, color: COLORS.text,
+                border: `1px solid ${accent}60`, borderRadius: 3, outline: 'none',
+              }}
+            />
+            <button onClick={addWeight} style={{
+              fontFamily: FONT, fontSize: 10, fontWeight: 700, color: '#fff',
+              background: accent, border: 'none',
+              padding: '6px 14px', borderRadius: 3, cursor: 'pointer',
+              letterSpacing: '0.06em',
+            }}>+ ADD</button>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {!confirmDelete ? (
+            <button onClick={() => setConfirmDelete(true)} style={{
+              fontFamily: FONT, fontSize: 10, fontWeight: 600, color: COLORS.red,
+              background: 'transparent', border: `1px solid ${COLORS.red}60`,
+              padding: '8px 14px', borderRadius: 4, cursor: 'pointer',
+              letterSpacing: '0.06em',
+            }}>DELETE BOX SAMPLE</button>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontFamily: FONT, fontSize: 10, color: COLORS.red, fontWeight: 600 }}>Sure?</span>
+              <button onClick={onDelete} style={{
+                fontFamily: FONT, fontSize: 10, fontWeight: 700, color: '#fff',
+                background: COLORS.red, border: 'none',
+                padding: '6px 12px', borderRadius: 3, cursor: 'pointer',
+              }}>YES DELETE</button>
+              <button onClick={() => setConfirmDelete(false)} style={{
+                fontFamily: FONT, fontSize: 10, color: COLORS.text3,
+                background: 'transparent', border: `1px solid ${COLORS.border}`,
+                padding: '6px 10px', borderRadius: 3, cursor: 'pointer',
+              }}>NO</button>
+            </div>
+          )}
+          <div style={{ flex: 1 }} />
+          <button onClick={onClose} style={{
+            fontFamily: FONT, fontSize: 11, color: COLORS.text2,
+            background: 'transparent', border: `1px solid ${COLORS.border}`,
+            padding: '8px 16px', borderRadius: 4, cursor: 'pointer',
+          }}>CANCEL</button>
+          <button onClick={save} style={{
+            fontFamily: FONT, fontSize: 11, fontWeight: 700, color: '#fff',
+            background: accent, border: 'none',
+            padding: '8px 18px', borderRadius: 4, cursor: 'pointer',
+            letterSpacing: '0.06em',
+          }}>SAVE</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function BoxWeightEntry({ weights, setWeights, tolerance, setTolerance, activeMethod, onSetMethod, onSave, onCancel }) {
+  const [entry, setEntry] = React.useState('')
+  const inputRef = React.useRef(null)
+
+  // Load enabled methods + customs so QCer can swap pack types inside box mode
+  const customMethods = React.useMemo(() => {
+    try { return JSON.parse(localStorage.getItem('bc_custom_methods') || '[]') } catch { return [] }
+  }, [])
+  const enabledMethods = React.useMemo(() => {
+    try {
+      const raw = localStorage.getItem('bc_enabled_methods')
+      return raw ? JSON.parse(raw) : null
+    } catch { return null }
+  }, [])
+  // Box mode — one chip per physical pack. Keys map to the 30-berry methods
+  // so the pack banner picks up the same blue/orange theme as regular sampling.
+  const BUILTIN_PACKS = [
+    { key: 'pint30', label: 'PINT', labelWeight: 302, color: '#1E40AF' },
+    { key: '18oz30', label: '18OZ', labelWeight: 518, color: '#EA580C' },
+    { key: 'mightyblue30', label: 'MIGHTY BLUE', labelWeight: 282, color: '#0891B2' },
+  ]
+  const customPacks = customMethods.map(c => ({
+    key: c.key, label: c.label.toUpperCase(), labelWeight: c.labelWeight, color: c.color || '#DB2777',
+  }))
+  const allPacks = [...BUILTIN_PACKS, ...customPacks]
+  const visiblePacks = enabledMethods === null ? allPacks : allPacks.filter(p => enabledMethods.includes(p.key))
+  const activePack = allPacks.find(p => p.key === activeMethod) || BUILTIN_PACKS[0]
+  const accent = activePack.color
+
+  // Label weight auto-updates when pack changes; still manually editable
+  const [labelWeight, setLabelWeight] = React.useState(activePack.labelWeight)
+  React.useEffect(() => { setLabelWeight(activePack.labelWeight) }, [activeMethod])
+
+  const addWeight = () => {
+    const n = parseFloat(entry)
+    if (!n || n <= 0) return
+    setWeights([...weights, n])
+    setEntry('')
+    if (inputRef.current) inputRef.current.focus()
+  }
+
+  const removeWeight = (idx) => {
+    setWeights(weights.filter((_, i) => i !== idx))
+  }
+
+  const rules = React.useMemo(() => loadPackTolerance(), [])
+  const count = weights.length
+  const mean = count > 0 ? weights.reduce((a, b) => a + b, 0) / count : 0
+  const min = count > 0 ? Math.min(...weights) : 0
+  const max = count > 0 ? Math.max(...weights) : 0
+  const classes = weights.map(w => classifyWeight(w, labelWeight, rules))
+  const inSpec = classes.filter(c => c === 'green').length
+  const under = weights.filter(w => w < labelWeight - labelWeight * rules.greenPct / 100).length
+  const over = classes.filter(c => c === 'red').length
+  const pctInSpec = count > 0 ? (inSpec / count) * 100 : 0
+  const passColor = pctInSpec >= 95 ? COLORS.green : pctInSpec >= 85 ? COLORS.amber : COLORS.red
+  const passLabel = count === 0 ? '—' : pctInSpec >= 95 ? 'PASS' : pctInSpec >= 85 ? 'BORDERLINE' : 'FAIL'
+
+  return (
+    <div style={{ padding: '12px 16px' }}>
+      {/* Pack type picker — match regular sampling so QCer knows which pack */}
+      {visiblePacks.length > 1 && onSetMethod && (
+        <div style={{
+          display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap',
+          padding: '8px 10px',
+          background: COLORS.bg2, border: `1px solid ${COLORS.border}`,
+          borderRadius: 6,
+        }}>
+          <span style={{
+            fontFamily: FONT, fontSize: 9, fontWeight: 700, color: COLORS.text3,
+            textTransform: 'uppercase', letterSpacing: '0.08em',
+            alignSelf: 'center',
+          }}>Pack Type</span>
+          {visiblePacks.map(p => {
+            const on = p.key === activeMethod
+            return (
+              <button key={p.key} onClick={() => onSetMethod(p.key)} style={{
+                fontFamily: FONT, fontSize: 10, fontWeight: 800,
+                color: on ? '#fff' : p.color,
+                background: on ? p.color : p.color + '12',
+                border: `1px solid ${p.color}`,
+                padding: '5px 12px', borderRadius: 4, cursor: 'pointer',
+                letterSpacing: '0.06em',
+              }}>
+                {p.label}
+              </button>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Config row: label target + rule summary — themed to active pack */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10,
+        padding: '10px 12px',
+        background: COLORS.bg, border: `2px solid ${accent}`, borderRadius: 6,
+      }}>
+        <label style={{ fontFamily: FONT, fontSize: 9, color: COLORS.text3 }}>
+          Label Target (g)
+          <input type="number" min="0" step="1" value={labelWeight}
+            onChange={e => setLabelWeight(parseFloat(e.target.value) || 0)}
+            style={{
+              display: 'block', marginTop: 3, padding: '4px 8px', width: 80,
+              fontFamily: FONT, fontSize: 18, fontWeight: 800, color: accent,
+              border: `1px solid ${accent}60`, background: accent + '12',
+              borderRadius: 3, outline: 'none',
+            }}
+          />
+        </label>
+        <div style={{ flex: 1 }} />
+        <div style={{
+          fontFamily: FONT, fontSize: 10, color: COLORS.text3, textAlign: 'right', lineHeight: 1.4,
+        }}>
+          <span style={{ color: COLORS.green, fontWeight: 700 }}>Green</span> ±{rules.greenPct}%
+          {' · '}
+          <span style={{ color: COLORS.amber, fontWeight: 700 }}>Yellow</span> up to +{rules.yellowOverG}g
+          {' · '}
+          <span style={{ color: COLORS.red, fontWeight: 700 }}>Red</span> over +{rules.yellowOverG}g<br />
+          <span style={{ color: COLORS.text3, fontSize: 9 }}>
+            Green zone: {(labelWeight - labelWeight * rules.greenPct / 100).toFixed(1)}g – {(labelWeight + labelWeight * rules.greenPct / 100).toFixed(1)}g
+          </span>
+        </div>
+      </div>
+
+      {/* Weight entry — themed */}
+      <div style={{
+        display: 'flex', alignItems: 'stretch', gap: 8, marginBottom: 10,
+      }}>
+        <input
+          ref={inputRef}
+          type="number" min="0" step="0.1"
+          value={entry}
+          onChange={e => setEntry(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') addWeight() }}
+          placeholder="weight (g)"
+          autoFocus
+          style={{
+            flex: 1, padding: '12px 14px',
+            fontFamily: FONT, fontSize: 24, fontWeight: 800, color: COLORS.text,
+            border: `2px solid ${accent}`, borderRadius: 6, outline: 'none',
+          }}
+        />
+        <button onClick={addWeight} style={{
+          fontFamily: FONT, fontSize: 13, fontWeight: 800, color: '#fff',
+          background: accent, border: 'none',
+          padding: '0 22px', borderRadius: 6, cursor: 'pointer',
+          letterSpacing: '0.08em',
+        }}>+ ADD</button>
+      </div>
+
+      {/* Stats */}
+      <div style={{
+        display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 6,
+        marginBottom: 10,
+      }}>
+        {[
+          { k: 'N', v: count, c: COLORS.text },
+          { k: 'Mean', v: count ? mean.toFixed(1) + 'g' : '—', c: COLORS.text },
+          { k: 'Min', v: count ? min.toFixed(1) + 'g' : '—', c: COLORS.text2 },
+          { k: 'Max', v: count ? max.toFixed(1) + 'g' : '—', c: COLORS.text2 },
+          { k: 'Under', v: under, c: under > 0 ? COLORS.red : COLORS.text3 },
+          { k: 'Over', v: over, c: over > 0 ? COLORS.amber : COLORS.text3 },
+        ].map(s => (
+          <div key={s.k} style={{
+            background: COLORS.bg2, border: `1px solid ${COLORS.border}`,
+            borderRadius: 4, padding: '6px 8px', textAlign: 'center',
+          }}>
+            <div style={{ fontFamily: FONT, fontSize: 15, fontWeight: 800, color: s.c }}>{s.v}</div>
+            <div style={{ fontFamily: FONT, fontSize: 8, color: COLORS.text3, letterSpacing: '0.08em', textTransform: 'uppercase' }}>{s.k}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Pass/fail summary */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 12,
+        padding: '10px 14px', marginBottom: 10,
+        background: passColor + '15',
+        border: `2px solid ${passColor}`,
+        borderRadius: 6,
+      }}>
+        <div style={{
+          fontFamily: FONT, fontSize: 18, fontWeight: 800, color: passColor,
+          letterSpacing: '0.06em',
+        }}>{passLabel}</div>
+        <div style={{ flex: 1 }} />
+        <div style={{
+          fontFamily: FONT, fontSize: 14, fontWeight: 700, color: passColor,
+        }}>{count > 0 ? `${inSpec}/${count} in spec (${pctInSpec.toFixed(1)}%)` : 'Add weights to begin'}</div>
+      </div>
+
+      {/* Weight list */}
+      {count > 0 && (
+        <div style={{
+          maxHeight: 180, overflowY: 'auto',
+          border: `1px solid ${COLORS.border}`, borderRadius: 4,
+          marginBottom: 10,
+        }}>
+          {weights.map((w, i) => {
+            const cls = classifyWeight(w, labelWeight, rules)
+            const isUnder = w < labelWeight - labelWeight * rules.greenPct / 100
+            const c = CLASS_COLORS[cls]
+            const inSp = cls === 'green'
+            const dev = w - labelWeight
+            return (
+              <div key={i} style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '6px 10px',
+                borderBottom: i < weights.length - 1 ? `1px solid ${COLORS.border}` : 'none',
+                background: i % 2 === 0 ? COLORS.bg : COLORS.bg2,
+              }}>
+                <span style={{ fontFamily: FONT, fontSize: 9, color: COLORS.text3, width: 22 }}>#{i + 1}</span>
+                <span style={{ fontFamily: FONT, fontSize: 14, fontWeight: 700, color: c, width: 64 }}>{w.toFixed(1)}g</span>
+                <span style={{ fontFamily: FONT, fontSize: 9, color: c, letterSpacing: '0.04em', fontWeight: 600 }}>
+                  {inSp ? 'IN SPEC' : `${isUnder ? 'UNDER' : 'OVER'} ${dev >= 0 ? '+' : ''}${dev.toFixed(1)}g`}
+                </span>
+                <div style={{ flex: 1 }} />
+                <button onClick={() => removeWeight(i)} style={{
+                  fontFamily: FONT, fontSize: 8, color: COLORS.text3,
+                  background: 'transparent', border: `1px solid ${COLORS.border}`,
+                  padding: '1px 6px', borderRadius: 2, cursor: 'pointer',
+                }}>×</button>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Actions */}
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button onClick={onCancel} style={{
+          flex: 1, background: COLORS.bg3,
+          border: `1px solid ${COLORS.border2}`, color: COLORS.text3,
+          fontFamily: FONT, fontSize: 11, fontWeight: 600,
+          letterSpacing: '0.06em', textTransform: 'uppercase',
+          padding: 12, borderRadius: 4, cursor: 'pointer',
+        }}>CANCEL</button>
+        <button onClick={() => onSave(labelWeight, rules.yellowOverG)}
+          disabled={count === 0}
+          style={{
+            flex: 2, background: count === 0 ? '#ccc' : accent + '20',
+            border: `2px solid ${count === 0 ? COLORS.border2 : accent}`,
+            color: count === 0 ? COLORS.text3 : accent,
+            fontFamily: FONT, fontSize: 14, fontWeight: 700,
+            letterSpacing: '0.08em', textTransform: 'uppercase',
+            padding: 12, borderRadius: 4,
+            cursor: count === 0 ? 'not-allowed' : 'pointer',
+          }}>SAVE BOX ({count})</button>
+      </div>
+    </div>
+  )
+}
+
+function SampleEditor({ sample, history, gradingStandard, onSave, onDelete, onClose }) {
+  const [dailyPalletNum, setDailyPalletNum] = React.useState(sample.dailyPalletNum || 1)
+  const [sampleNum, setSampleNum] = React.useState(sample.sampleNum || 1)
+  const [lotId, setLotId] = React.useState(sample.lotId || '')
+  const [good, setGood] = React.useState(sample.good || 0)
+  const [permanent, setPermanent] = React.useState(sample.permanent || 0)
+  const [condition, setCondition] = React.useState(sample.condition || 0)
+  const [decay, setDecay] = React.useState(sample.decay || 0)
+  const [confirmDelete, setConfirmDelete] = React.useState(false)
+
+  const currentResult = gradeSample({ good, permanent, condition, decay },
+    (GRADING_STANDARDS[sample._gradingStandard] || GRADING_STANDARDS[gradingStandard] || GRADING_STANDARDS.mbg).tolerances)
+  const currentColor = currentResult.status === 'excellent' || currentResult.status === 'ok' ? COLORS.green
+    : currentResult.status === 'warn' ? COLORS.amber
+    : currentResult.status === 'fail' ? COLORS.red : COLORS.text3
+
+  const layerNames = { 1: '#1 BOTTOM', 2: '#2 MIDDLE', 3: '#3 TOP' }
+
+  const save = () => {
+    onSave({
+      dailyPalletNum: parseInt(dailyPalletNum) || 1,
+      sampleNum: parseInt(sampleNum) || 1,
+      lotId,
+      good: parseInt(good) || 0,
+      permanent: parseInt(permanent) || 0,
+      condition: parseInt(condition) || 0,
+      decay: parseInt(decay) || 0,
+    })
+  }
+
+  // Warn if reassignment would collide with an existing sample
+  const collision = history.find(s =>
+    s.id !== sample.id &&
+    s.dailyPalletNum === parseInt(dailyPalletNum) &&
+    s.sampleNum === parseInt(sampleNum) &&
+    s.date === sample.date &&
+    !s.isExtra
+  )
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 3000,
+      background: 'rgba(0,0,0,0.55)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+    }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background: '#fff', borderRadius: 10, padding: 20,
+        maxWidth: 480, width: '100%', maxHeight: '90vh', overflowY: 'auto',
+        border: `2px solid ${currentColor}`,
+      }}>
+        <div style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12,
+        }}>
+          <div>
+            <div style={{
+              fontFamily: FONT, fontSize: 14, fontWeight: 800, color: COLORS.text,
+              letterSpacing: '0.04em',
+            }}>Edit Sample</div>
+            <div style={{
+              fontFamily: FONT, fontSize: 10, color: COLORS.text3, marginTop: 2,
+            }}>
+              {sample.date} · {sample.time} · id {String(sample.id).slice(-6)}
+            </div>
+          </div>
+          <div style={{
+            fontFamily: FONT, fontSize: 18, fontWeight: 800, color: currentColor,
+            padding: '4px 12px', borderRadius: 4,
+            background: currentColor + '15', border: `1px solid ${currentColor}60`,
+          }}>{currentResult.label}</div>
+        </div>
+
+        {/* Reassign pallet + layer */}
+        <div style={{
+          padding: 12, marginBottom: 12,
+          background: COLORS.bg2, border: `1px solid ${COLORS.border2}`, borderRadius: 4,
+        }}>
+          <div style={{
+            fontFamily: FONT, fontSize: 10, fontWeight: 700, color: COLORS.text,
+            textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8,
+          }}>Reassign</div>
+          <div style={{ display: 'flex', gap: 10, marginBottom: 8 }}>
+            <label style={{ flex: 1, fontFamily: FONT, fontSize: 10, color: COLORS.text3 }}>
+              Daily Pallet #
+              <input type="number" min="1" value={dailyPalletNum}
+                onChange={e => setDailyPalletNum(e.target.value)}
+                style={{
+                  display: 'block', width: '100%', marginTop: 3, padding: '6px 8px',
+                  fontFamily: FONT, fontSize: 16, fontWeight: 700, color: COLORS.text,
+                  border: `1px solid ${COLORS.border2}`, borderRadius: 3, outline: 'none',
+                  boxSizing: 'border-box',
+                }}
+              />
+            </label>
+            <label style={{ flex: 1, fontFamily: FONT, fontSize: 10, color: COLORS.text3 }}>
+              Layer
+              <select value={sampleNum} onChange={e => setSampleNum(parseInt(e.target.value))}
+                style={{
+                  display: 'block', width: '100%', marginTop: 3, padding: '6px 8px',
+                  fontFamily: FONT, fontSize: 13, fontWeight: 700, color: COLORS.text,
+                  border: `1px solid ${COLORS.border2}`, borderRadius: 3, outline: 'none',
+                  boxSizing: 'border-box', background: '#fff',
+                }}>
+                <option value={1}>{layerNames[1]}</option>
+                <option value={2}>{layerNames[2]}</option>
+                <option value={3}>{layerNames[3]}</option>
+              </select>
+            </label>
+          </div>
+          <label style={{ fontFamily: FONT, fontSize: 10, color: COLORS.text3 }}>
+            Pallet Tag (optional)
+            <input value={lotId} onChange={e => setLotId(e.target.value)}
+              placeholder="scan or type"
+              style={{
+                display: 'block', width: '100%', marginTop: 3, padding: '6px 8px',
+                fontFamily: FONT, fontSize: 13, color: COLORS.text,
+                border: `1px solid ${COLORS.border}`, borderRadius: 3, outline: 'none',
+                boxSizing: 'border-box',
+              }}
+            />
+          </label>
+          {collision && (
+            <div style={{
+              marginTop: 8, padding: '6px 8px',
+              background: COLORS.amberDim, border: `1px solid ${COLORS.amber}`,
+              borderRadius: 3, fontFamily: FONT, fontSize: 10, color: COLORS.amber,
+              fontWeight: 600,
+            }}>
+              ⚠ Pallet #{dailyPalletNum} layer {sampleNum} already has a sample. Save anyway?
+            </div>
+          )}
+        </div>
+
+        {/* Defect counts (quick 3-pile edit) */}
+        <div style={{
+          padding: 12, marginBottom: 12,
+          background: COLORS.bg2, border: `1px solid ${COLORS.border2}`, borderRadius: 4,
+        }}>
+          <div style={{
+            fontFamily: FONT, fontSize: 10, fontWeight: 700, color: COLORS.text,
+            textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8,
+          }}>Counts (3-pile)</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 8 }}>
+            {[
+              { label: 'Good', val: good, set: setGood, color: COLORS.green },
+              { label: 'Perm', val: permanent, set: setPermanent, color: COLORS.amber },
+              { label: 'Cond', val: condition, set: setCondition, color: '#D85A30' },
+              { label: 'Decay', val: decay, set: setDecay, color: COLORS.red },
+            ].map(f => (
+              <label key={f.label} style={{ fontFamily: FONT, fontSize: 9, color: COLORS.text3 }}>
+                {f.label}
+                <input type="number" min="0" value={f.val}
+                  onChange={e => f.set(parseInt(e.target.value) || 0)}
+                  style={{
+                    display: 'block', width: '100%', marginTop: 3, padding: '6px 8px',
+                    fontFamily: FONT, fontSize: 18, fontWeight: 700, color: f.color,
+                    border: `1px solid ${COLORS.border2}`, borderRadius: 3, outline: 'none',
+                    boxSizing: 'border-box', background: '#fff',
+                  }}
+                />
+              </label>
+            ))}
+          </div>
+          <div style={{
+            marginTop: 8, fontFamily: FONT, fontSize: 10, color: COLORS.text3,
+          }}>
+            Note: editing here overrides per-defect detail (stems/shrivel/etc.) with 3-pile totals.
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {!confirmDelete ? (
+            <button onClick={() => setConfirmDelete(true)} style={{
+              fontFamily: FONT, fontSize: 10, fontWeight: 600, color: COLORS.red,
+              background: 'transparent', border: `1px solid ${COLORS.red}60`,
+              padding: '8px 14px', borderRadius: 4, cursor: 'pointer',
+              letterSpacing: '0.06em',
+            }}>DELETE SAMPLE</button>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontFamily: FONT, fontSize: 10, color: COLORS.red, fontWeight: 600 }}>Sure?</span>
+              <button onClick={onDelete} style={{
+                fontFamily: FONT, fontSize: 10, fontWeight: 700, color: '#fff',
+                background: COLORS.red, border: 'none',
+                padding: '6px 12px', borderRadius: 3, cursor: 'pointer',
+              }}>YES DELETE</button>
+              <button onClick={() => setConfirmDelete(false)} style={{
+                fontFamily: FONT, fontSize: 10, color: COLORS.text3,
+                background: 'transparent', border: `1px solid ${COLORS.border}`,
+                padding: '6px 10px', borderRadius: 3, cursor: 'pointer',
+              }}>NO</button>
+            </div>
+          )}
+          <div style={{ flex: 1 }} />
+          <button onClick={onClose} style={{
+            fontFamily: FONT, fontSize: 11, color: COLORS.text2,
+            background: 'transparent', border: `1px solid ${COLORS.border}`,
+            padding: '8px 16px', borderRadius: 4, cursor: 'pointer',
+          }}>CANCEL</button>
+          <button onClick={save} style={{
+            fontFamily: FONT, fontSize: 11, fontWeight: 700, color: '#fff',
+            background: COLORS.green, border: 'none',
+            padding: '8px 18px', borderRadius: 4, cursor: 'pointer',
+            letterSpacing: '0.06em',
+          }}>SAVE</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function LineSwitcher({ activeLine, lotId, counts, onSwitch }) {
+  const readSlot = (key) => {
+    try { return JSON.parse(localStorage.getItem(`bc_slot_${key}`) || '{}') } catch { return {} }
+  }
+  const slot1 = readSlot('line1')
+  const slot2 = readSlot('line2')
+
+  const renderBtn = (k, label, slot) => {
+    const active = activeLine === k
+    const effLotId = active ? lotId : (slot.lotId || '')
+    const effCounts = active ? counts : (slot.counts || {})
+    const hasWork = !!(effLotId || effCounts.permanent || effCounts.condition || effCounts.decay)
+    const subtitle = effLotId || (hasWork ? 'in progress' : 'empty')
+    return (
+      <button
+        key={k}
+        type="button"
+        onClick={() => onSwitch(k)}
+        style={{
+          flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
+          padding: '10px 10px',
+          background: active ? COLORS.green : (hasWork ? COLORS.amberDim : COLORS.bg2),
+          color: active ? COLORS.white : COLORS.text,
+          border: 'none',
+          borderBottom: `2px solid ${active ? COLORS.green : (hasWork ? COLORS.amber : COLORS.border)}`,
+          cursor: 'pointer',
+          fontFamily: FONT, letterSpacing: '0.06em',
+        }}
+      >
+        <div style={{ fontSize: 11, fontWeight: 800 }}>{label}</div>
+        <div style={{
+          fontSize: 9, fontWeight: 500,
+          color: active ? 'rgba(255,255,255,0.85)' : COLORS.text3,
+        }}>
+          {subtitle}
+        </div>
+      </button>
+    )
+  }
+
+  return (
+    <div style={{ display: 'flex' }}>
+      {renderBtn('line1', 'LINE 1', slot1)}
+      {renderBtn('line2', 'LINE 2', slot2)}
     </div>
   )
 }

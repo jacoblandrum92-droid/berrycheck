@@ -32,10 +32,16 @@ except ImportError:
 CAMERA_INDEX = 1           # 0 = phantom device, 1 = USB camera
 RELAY_URL = "ws://localhost:5175?role=grader"
 HSV_FILE = "berry_hsv_values.json"
+CROP_FILE = "berry_crop_values.json"
 YOLO_MODEL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ml", "berry_model.pt")
 SNAPSHOT_DIR = "snapshots"
 FRAME_INTERVAL = 0.1       # seconds between frames sent (10 fps)
 JPEG_QUALITY = 70          # lower = smaller frames, faster streaming
+# ROI crop — fraction to trim from each edge (ignores stuff outside the tray)
+CROP_LEFT = 0.06
+CROP_RIGHT = 0.02
+CROP_TOP = 0.0
+CROP_BOTTOM = 0.04
 
 # =============================================================
 # HSV PROFILES — presets for different fruit
@@ -80,6 +86,11 @@ class CameraService:
         self.min_area = MIN_BERRY_AREA
         self.max_area = MAX_BERRY_AREA
         self.min_circularity = MIN_CIRCULARITY
+        self.crop_left = CROP_LEFT
+        self.crop_right = CROP_RIGHT
+        self.crop_top = CROP_TOP
+        self.crop_bottom = CROP_BOTTOM
+        self._load_crop()
         self.running = False
         self.ws = None
         self._ws_connected = False
@@ -122,20 +133,49 @@ class CameraService:
             json.dump(self.hsv, f, indent=2)
         print(f"[hsv] Saved to {HSV_FILE}")
 
+    def _load_crop(self):
+        if os.path.exists(CROP_FILE):
+            try:
+                with open(CROP_FILE, "r") as f:
+                    vals = json.load(f)
+                    self.crop_left = float(vals.get("left", CROP_LEFT))
+                    self.crop_right = float(vals.get("right", CROP_RIGHT))
+                    self.crop_top = float(vals.get("top", CROP_TOP))
+                    self.crop_bottom = float(vals.get("bottom", CROP_BOTTOM))
+                    print(f"[crop] Loaded from {CROP_FILE}")
+            except Exception as e:
+                print(f"[crop] Load failed ({e}), using defaults")
+
+    def save_crop(self):
+        with open(CROP_FILE, "w") as f:
+            json.dump({
+                "left": self.crop_left, "right": self.crop_right,
+                "top": self.crop_top, "bottom": self.crop_bottom,
+            }, f, indent=2)
+        print(f"[crop] Saved to {CROP_FILE}")
+
     def process_frame(self, frame):
         """Detect berries — always HSV for live feed (fast). YOLO used only for label captures."""
         return self._process_frame_hsv(frame)
 
     def _yolo_detect(self, frame):
-        """Run YOLO once on a frame, return deduplicated berries list."""
-        results = self.yolo_model(frame, verbose=False, conf=0.30)[0]
+        """Run YOLO on cropped ROI, return deduplicated berries in full-frame coords."""
+        h, w = frame.shape[:2]
+        x0 = int(w * self.crop_left)
+        y0 = int(h * self.crop_top)
+        x1 = int(w * (1 - self.crop_right))
+        y1 = int(h * (1 - self.crop_bottom))
+        cropped = frame[y0:y1, x0:x1]
+
+        results = self.yolo_model(cropped, verbose=False, conf=0.40)[0]
         raw = []
         for box in results.boxes:
-            x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().astype(int)
-            cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
-            r = max(x2 - x1, y2 - y1) // 2
+            bx1, by1, bx2, by2 = box.xyxy[0].cpu().numpy().astype(int)
+            # Map back to full-frame coordinates
+            cx, cy = (bx1 + bx2) // 2 + x0, (by1 + by2) // 2 + y0
+            r = max(bx2 - bx1, by2 - by1) // 2
             conf = float(box.conf[0])
-            raw.append({"x": int(cx), "y": int(cy), "r": int(r), "area": int((x2-x1)*(y2-y1)), "circ": conf})
+            raw.append({"x": int(cx), "y": int(cy), "r": int(r), "area": int((bx2-bx1)*(by2-by1)), "circ": conf})
 
         # Deduplicate — merge overlapping detections, keep highest confidence
         raw.sort(key=lambda b: b["circ"], reverse=True)
@@ -155,7 +195,7 @@ class CameraService:
 
     def _process_frame_yolo(self, frame):
         """YOLO-based berry detection."""
-        results = self.yolo_model(frame, verbose=False, conf=0.30)[0]
+        results = self.yolo_model(frame, verbose=False, conf=0.40)[0]
 
         berries = []
         berry_count = 0
@@ -205,6 +245,13 @@ class CameraService:
 
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
+        # Crop bounds in pixel coords — only count berries whose center sits inside
+        h, w = frame.shape[:2]
+        x_min = w * self.crop_left
+        x_max = w * (1 - self.crop_right)
+        y_min = h * self.crop_top
+        y_max = h * (1 - self.crop_bottom)
+
         berries = []
         berry_count = 0
         split_attempts = 0
@@ -221,9 +268,11 @@ class CameraService:
 
             if circularity >= self.min_circularity:
                 # Single berry — passes both filters
-                berry_count += 1
                 (x, y), radius = cv2.minEnclosingCircle(contour)
                 cx, cy, r = int(x), int(y), int(radius)
+                if not (x_min <= cx <= x_max and y_min <= cy <= y_max):
+                    continue
+                berry_count += 1
                 berries.append({"x": cx, "y": cy, "r": r, "area": int(area), "circ": round(circularity, 2)})
                 cv2.circle(frame, (cx, cy), r, (0, 255, 0), 2)
                 cv2.putText(frame, str(berry_count),
@@ -233,8 +282,11 @@ class CameraService:
                 # Failed circularity — likely merged berries, try to split (max 10/frame)
                 if split_attempts < 10:
                     split_attempts += 1
-                    split_count = self._split_merged(contour, mask, frame, berries, berry_count)
+                    split_count = self._split_merged(contour, mask, frame, berries, berry_count, (x_min, x_max, y_min, y_max))
                     berry_count += split_count
+
+        # Visible crop rectangle (debug overlay)
+        cv2.rectangle(frame, (int(x_min), int(y_min)), (int(x_max), int(y_max)), (180, 180, 180), 1)
 
         # Overlay info
         cv2.putText(frame, f"Berries: {berry_count}", (10, 30),
@@ -245,7 +297,7 @@ class CameraService:
 
         return frame, mask, filtered, berry_count, berries
 
-    def _split_merged(self, contour, full_mask, frame, berries, start_count):
+    def _split_merged(self, contour, full_mask, frame, berries, start_count, bounds=None):
         """Split a merged contour into individual berries using distance transform peaks.
 
         When two berries touch, they form one blob that fails circularity.
@@ -298,6 +350,10 @@ class CameraService:
             area_est = int(3.14159 * r * r)
             if area_est < self.min_area // 2:
                 continue
+            if bounds is not None:
+                bx_min, bx_max, by_min, by_max = bounds
+                if not (bx_min <= cx <= bx_max and by_min <= cy <= by_max):
+                    continue
             found += 1
             idx = start_count + found
             berries.append({"x": cx, "y": cy, "r": r, "area": area_est, "circ": 0.0})
@@ -365,6 +421,15 @@ class CameraService:
 
         elif action == "capture_training":
             self._capture_training = True
+
+        elif action == "update_crop":
+            for key, attr in (("left", "crop_left"), ("right", "crop_right"),
+                              ("top", "crop_top"), ("bottom", "crop_bottom")):
+                if key in msg:
+                    setattr(self, attr, max(0.0, min(0.45, float(msg[key]))))
+
+        elif action == "save_crop":
+            self.save_crop()
 
         elif action == "set_camera":
             idx = msg.get("index", CAMERA_INDEX)
@@ -493,6 +558,9 @@ class CameraService:
         ws_thread = threading.Thread(target=self._ws_run_forever, daemon=True)
         ws_thread.start()
         self._take_snapshot = False
+        self._yolo_last_scan = 0
+        self._yolo_berries = []
+        self._yolo_count = 0
         last_send = 0
 
         print("[camera] Streaming... Press Ctrl+C to stop\n")
@@ -549,21 +617,47 @@ class CameraService:
                     })
                     print(f"[training] Captured frame with {len(berries)} auto-labels")
 
-                # Rate-limit WebSocket sends
+                # YOLO periodic scan — every 3 seconds, one inference
                 now = time.time()
+                if self.yolo_model and (now - self._yolo_last_scan) >= 3.0:
+                    self._yolo_last_scan = now
+                    self._yolo_berries = self._yolo_detect(frame)
+                    self._yolo_count = len(self._yolo_berries)
+
+                # Build display frame: YOLO overlay if available, else HSV
+                if self._yolo_berries:
+                    display = frame.copy()
+                    for i, b in enumerate(self._yolo_berries):
+                        cv2.circle(display, (b["x"], b["y"]), b["r"], (0, 255, 0), 2)
+                        cv2.putText(display, str(i + 1), (b["x"] - 8, b["y"] - b["r"] - 5),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                    cv2.putText(display, f"Berries: {self._yolo_count} (YOLO)", (10, 30),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+                    display_count = self._yolo_count
+                    display_berries = self._yolo_berries
+                else:
+                    display = annotated
+                    display_count = stable_count
+                    display_berries = berries
+
+                # Rate-limit WebSocket sends
                 if self.streaming and (now - last_send) >= FRAME_INTERVAL:
                     last_send = now
                     self.send_msg({
                         "type": "grader_frame",
-                        "frame": self.frame_to_jpeg_base64(annotated),
+                        "frame": self.frame_to_jpeg_base64(display),
                         "mask": self.mask_to_png_base64(mask),
                         "filtered": self.frame_to_jpeg_base64(filtered),
-                        "count": stable_count,
+                        "count": display_count,
                         "raw_count": count,
-                        "berries": berries,
+                        "berries": display_berries,
                         "hsv": self.hsv,
                         "blur": self.use_blur,
                         "profile": self.profile,
+                        "crop": {
+                            "left": self.crop_left, "right": self.crop_right,
+                            "top": self.crop_top, "bottom": self.crop_bottom,
+                        },
                         "timestamp": datetime.now().isoformat(),
                     })
 

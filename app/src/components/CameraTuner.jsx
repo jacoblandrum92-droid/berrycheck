@@ -39,7 +39,7 @@ function classifyBerries(berries, width, height) {
  *   onUseCount      — callback(count) to send berry count to the QC form
  */
 
-export default function CameraTuner({ wsRef, graderConnected, onUseCount }) {
+export default function CameraTuner({ wsRef, graderConnected, relayConnected, onUseCount }) {
   const canvasRef = useRef(null)
   const maskCanvasRef = useRef(null)
   const filteredCanvasRef = useRef(null)
@@ -58,6 +58,8 @@ export default function CameraTuner({ wsRef, graderConnected, onUseCount }) {
   const [blur, setBlur] = useState(true)
   const [minArea, setMinArea] = useState(300)
   const [maxArea, setMaxArea] = useState(50000)
+  const [crop, setCrop] = useState({ left: 0.06, right: 0.02, top: 0.0, bottom: 0.04 })
+  const cropTimeout = useRef(null)
   const frameCountRef = useRef(0)
   const lastFpsTime = useRef(Date.now())
   const latestCountRef = useRef(0)
@@ -78,6 +80,19 @@ export default function CameraTuner({ wsRef, graderConnected, onUseCount }) {
     if (wsRef?.current && wsRef.current.readyState === 1) {
       wsRef.current.send(JSON.stringify({ type: 'command', ...cmd }))
     }
+  }, [wsRef])
+
+  const updateCrop = useCallback((side, value) => {
+    setCrop(prev => {
+      const next = { ...prev, [side]: value }
+      clearTimeout(cropTimeout.current)
+      cropTimeout.current = setTimeout(() => {
+        if (wsRef?.current && wsRef.current.readyState === 1) {
+          wsRef.current.send(JSON.stringify({ type: 'command', action: 'update_crop', ...next }))
+        }
+      }, 50)
+      return next
+    })
   }, [wsRef])
 
   const hsvTimeout = useRef(null)
@@ -133,6 +148,10 @@ export default function CameraTuner({ wsRef, graderConnected, onUseCount }) {
     })
     if (msg.blur !== undefined) setBlur(msg.blur)
     if (msg.profile) setProfile(msg.profile)
+    if (msg.crop) setCrop(prev => {
+      const same = ['left','right','top','bottom'].every(k => prev[k] === msg.crop[k])
+      return same ? prev : msg.crop
+    })
 
     frameCountRef.current++
     const now = Date.now()
@@ -180,14 +199,14 @@ export default function CameraTuner({ wsRef, graderConnected, onUseCount }) {
   }, [showMask, showFiltered])
 
   useEffect(() => {
-    if (!wsRef?.current) return
+    if (!relayConnected || !wsRef?.current) return
     const ws = wsRef.current
     const handler = (event) => {
       try { handleFrame(JSON.parse(event.data)) } catch {}
     }
     ws.addEventListener('message', handler)
     return () => ws.removeEventListener('message', handler)
-  }, [wsRef?.current, handleFrame])
+  }, [relayConnected, wsRef, handleFrame])
 
   // Fetch training count on mount and after saves
   useEffect(() => {
@@ -402,7 +421,18 @@ export default function CameraTuner({ wsRef, graderConnected, onUseCount }) {
             </span>
           )}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {!labelMode && (
+            <button onClick={retryCamera} disabled={retrying} title="Restart the camera helper if the feed is frozen or wrong" style={{
+              fontFamily: FONT, fontSize: 8, fontWeight: 700,
+              color: retrying ? COLORS.text3 : COLORS.text2,
+              background: 'transparent',
+              border: `1px solid ${retrying ? COLORS.border : COLORS.border2}`,
+              padding: '2px 6px', borderRadius: 3,
+              cursor: retrying ? 'default' : 'pointer',
+              letterSpacing: '0.08em',
+            }}>{retrying ? '...' : 'RESTART'}</button>
+          )}
           {trainingCount > 0 && (
             <span style={{ fontFamily: FONT, fontSize: 9, color: COLORS.text3 }}>
               {trainingCount} labeled
@@ -572,6 +602,28 @@ export default function CameraTuner({ wsRef, graderConnected, onUseCount }) {
             <span style={{ width: 30, fontSize: 10, color: COLORS.text2 }}>{maxArea}</span>
           </div>
 
+          {/* Crop / ROI */}
+          <div style={{ fontFamily: FONT, fontSize: 9, color: COLORS.text3, letterSpacing: '0.06em', marginTop: 8, marginBottom: 4, fontWeight: 600 }}>
+            CROP (TRAY EDGES)
+          </div>
+          {[
+            ['Left', 'left'],
+            ['Right', 'right'],
+            ['Top', 'top'],
+            ['Bottom', 'bottom'],
+          ].map(([label, side]) => (
+            <div key={side} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+              <span style={{ width: 40, fontSize: 10, textAlign: 'right', color: COLORS.text3 }}>{label}</span>
+              <input type="range" min={0} max={30} step={1}
+                value={Math.round((crop[side] || 0) * 100)}
+                onChange={e => updateCrop(side, parseInt(e.target.value) / 100)}
+                style={{ flex: 1, height: 4 }} />
+              <span style={{ width: 30, fontSize: 10, color: COLORS.text2 }}>
+                {Math.round((crop[side] || 0) * 100)}%
+              </span>
+            </div>
+          ))}
+
           {/* Toggles + actions */}
           <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
             <label style={{ fontFamily: FONT, fontSize: 10, color: COLORS.text3, display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -582,6 +634,7 @@ export default function CameraTuner({ wsRef, graderConnected, onUseCount }) {
               Blur
             </label>
             <div style={{ flex: 1 }} />
+            <button onClick={() => sendCommand({ action: 'save_crop' })} style={{ ...smallBtn, color: COLORS.green, borderColor: COLORS.green }}>SAVE CROP</button>
             <button onClick={() => sendCommand({ action: 'snapshot' })} style={smallBtn}>SNAP</button>
             <button onClick={() => sendCommand({ action: 'save_hsv' })} style={{ ...smallBtn, color: COLORS.green, borderColor: COLORS.green }}>SAVE</button>
             <button onClick={() => {

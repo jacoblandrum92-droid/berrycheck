@@ -135,8 +135,24 @@ app.get('/api/store/:key', (req, res) => {
 
 app.put('/api/store/:key', express.json({ limit: '10mb' }), (req, res) => {
   try {
-    writeFileSync(storePath(req.params.key), JSON.stringify(req.body))
-    broadcast({ type: 'sync', key: req.params.key }, 'dashboard')
+    const key = req.params.key
+    const incoming = req.body
+    // Safety net: if an existing non-trivial store is about to be wiped
+    // (cleared to [] or {}), snapshot it to a timestamped backup first.
+    const isWipe = (Array.isArray(incoming) && incoming.length === 0) ||
+                   (incoming && typeof incoming === 'object' && !Array.isArray(incoming) && Object.keys(incoming).length === 0)
+    if (isWipe) {
+      try {
+        const existing = readFileSync(storePath(key), 'utf-8')
+        if (existing && existing !== '[]' && existing !== '{}') {
+          const ts = new Date().toISOString().replace(/[:.]/g, '-')
+          writeFileSync(join(DATA_DIR, `${key}.backup.${ts}.json`), existing)
+          console.log(`[safety] Backed up ${key} → ${key}.backup.${ts}.json before wipe`)
+        }
+      } catch {}
+    }
+    writeFileSync(storePath(key), JSON.stringify(incoming))
+    broadcast({ type: 'sync', key: key }, 'dashboard')
     res.json({ ok: true })
   } catch (e) {
     res.status(500).json({ error: e.message })

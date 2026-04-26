@@ -1,12 +1,33 @@
 import { app, BrowserWindow, Menu } from 'electron';
 import { fileURLToPath } from 'url';
 import path from 'path';
-import { spawn } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
 import express from 'express';
 import { networkInterfaces } from 'os';
-import { readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync } from 'fs';
+
+// Find a working Python interpreter — never hard-code a user-specific path.
+// Tries PATH first, then common Windows install locations. Cached after first hit.
+let _pythonPath = null;
+function findPython() {
+  if (_pythonPath) return _pythonPath;
+  const candidates = ['python', 'python3', 'py'];
+  const localApp = process.env.LOCALAPPDATA || '';
+  for (const ver of ['Python313', 'Python312', 'Python311', 'Python310']) {
+    if (localApp) candidates.push(path.join(localApp, 'Programs', 'Python', ver, 'python.exe'));
+    candidates.push(`C:\\${ver}\\python.exe`);
+  }
+  for (const p of candidates) {
+    try {
+      const r = spawnSync(p, ['--version'], { stdio: 'ignore' });
+      if (r.status === 0) { _pythonPath = p; console.log(`[python] using ${p}`); return p; }
+    } catch {}
+  }
+  console.error('[python] No Python interpreter found. Install from python.org and check "Add to PATH".');
+  return null;
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.join(__dirname, '..');
@@ -44,7 +65,7 @@ function startRelay() {
           broadcast({ type: 'image', data: msg.data, timestamp: new Date().toLocaleTimeString('en-US', { hour12: false }) }, 'dashboard');
           ws.send(JSON.stringify({ type: 'ack', message: 'Sent to dashboard' }));
         }
-        if (role === 'grader' && (msg.type === 'grader_frame' || msg.type === 'grader_status' || msg.type === 'sample')) {
+        if (role === 'grader' && (msg.type === 'grader_frame' || msg.type === 'grader_status' || msg.type === 'sample' || msg.type === 'training_capture')) {
           broadcast(msg, 'dashboard');
         }
         if (role === 'scale' && (msg.type === 'scale_weight' || msg.type === 'scale_status' || msg.type === 'scale_ack')) {
@@ -167,6 +188,72 @@ function startRelay() {
     }, 500);
   });
 
+  // --- YOLO training data endpoints (mirrors server.js) ---
+  const appDir = app.isPackaged ? path.dirname(app.getPath('exe')) : rootDir;
+  const mlDatasetDir = path.join(appDir, 'ml', 'dataset');
+
+  expressApp.get('/api/training-count', (req, res) => {
+    try {
+      const trainDir = path.join(mlDatasetDir, 'images', 'train');
+      const files = readdirSync(trainDir).filter(f => f.endsWith('.jpg'));
+      res.json({ count: files.length });
+    } catch {
+      res.json({ count: 0 });
+    }
+  });
+
+  expressApp.post('/api/training-data', (req, res) => {
+    const { image, labels, width, height } = req.body || {};
+    if (!image || !labels) return res.status(400).json({ error: 'Missing image or labels' });
+
+    const trainImgDir = path.join(mlDatasetDir, 'images', 'train');
+    const trainLblDir = path.join(mlDatasetDir, 'labels', 'train');
+    mkdirSync(trainImgDir, { recursive: true });
+    mkdirSync(trainLblDir, { recursive: true });
+
+    let idx = 0;
+    try {
+      const existing = readdirSync(trainImgDir).filter(f => f.endsWith('.jpg'));
+      const nums = existing.map(f => parseInt(f)).filter(n => !isNaN(n));
+      if (nums.length > 0) idx = Math.max(...nums) + 1;
+    } catch {}
+    const name = String(idx).padStart(4, '0');
+
+    const imgBuf = Buffer.from(image, 'base64');
+    writeFileSync(path.join(trainImgDir, `${name}.jpg`), imgBuf);
+
+    const yoloLines = labels.map(({ x, y, r }) => {
+      const cx = Math.max(0, Math.min(1, x / width));
+      const cy = Math.max(0, Math.min(1, y / height));
+      const bw = Math.max(0, Math.min(1, (2 * r) / width));
+      const bh = Math.max(0, Math.min(1, (2 * r) / height));
+      return `0 ${cx.toFixed(6)} ${cy.toFixed(6)} ${bw.toFixed(6)} ${bh.toFixed(6)}`;
+    }).join('\n');
+    writeFileSync(path.join(trainLblDir, `${name}.txt`), yoloLines);
+
+    const total = readdirSync(trainImgDir).filter(f => f.endsWith('.jpg')).length;
+    console.log(`[training] Saved ${name}.jpg with ${labels.length} labels (${total} total)`);
+    res.json({ ok: true, idx, count: total });
+  });
+
+  expressApp.post('/api/start-training', (req, res) => {
+    const trainScript = path.join(appDir, 'ml', 'train.py');
+    if (!existsSync(trainScript)) return res.status(404).json({ error: 'train.py not found' });
+    const pythonPath = findPython();
+    if (!pythonPath) return res.status(500).json({ error: 'Python not found' });
+
+    const trainProc = spawn(pythonPath, ['-u', trainScript], {
+      cwd: path.join(appDir, 'ml'),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    trainProc.stdout.on('data', d => process.stdout.write('[train] ' + d));
+    trainProc.stderr.on('data', d => process.stderr.write('[train] ' + d));
+    trainProc.on('close', code => console.log(`[train] Finished (code ${code})`));
+
+    console.log(`[train] Started training (PID ${trainProc.pid})`);
+    res.json({ ok: true, pid: trainProc.pid });
+  });
+
   // Serve the built app
   const distDir = app.isPackaged
     ? path.join(path.dirname(app.getPath('exe')), 'dist')
@@ -209,8 +296,8 @@ function startRelay() {
 function startCamera() {
   const appDir = app.isPackaged ? path.dirname(app.getPath('exe')) : rootDir;
   const scriptPath = path.join(appDir, 'camera_service.py');
-  // Use full path to Python — packaged Electron can't find it on PATH
-  const pythonPath = 'C:\\Users\\jacob\\AppData\\Local\\Programs\\Python\\Python313\\python.exe';
+  const pythonPath = findPython();
+  if (!pythonPath) return;
   cameraProcess = spawn(pythonPath, ['-u', scriptPath], {
     cwd: appDir,
     stdio: 'pipe',
@@ -225,7 +312,8 @@ function startCamera() {
 function startScale() {
   const appDir = app.isPackaged ? path.dirname(app.getPath('exe')) : rootDir;
   const scriptPath = path.join(appDir, 'scale_service.py');
-  const pythonPath = 'C:\\Users\\jacob\\AppData\\Local\\Programs\\Python\\Python313\\python.exe';
+  const pythonPath = findPython();
+  if (!pythonPath) return;
   scaleProcess = spawn(pythonPath, ['-u', scriptPath], {
     cwd: appDir,
     stdio: 'pipe',

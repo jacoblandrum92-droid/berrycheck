@@ -11,19 +11,16 @@ const GRADE_COLORS = {
 
 export default function ScoreDisplay({ counts, packCriteria, tolerances }) {
   const result = gradeSample(counts, tolerances)
-  const hasData = result.total > 0
+  // Grade is only meaningful once defects are entered — don't pop a grade just from
+  // a total berry count, because no defects = "EXCELLENT" which is misleading.
+  const hasDefects = ((counts.permanent || 0) + (counts.condition || 0) + (counts.decay || 0) +
+    (counts.stems || 0) + (counts.greenRed || 0) + (counts.scars || 0) +
+    (counts.shrivel || 0) + (counts.bruise || 0) + (counts.soft || 0) +
+    (counts.crushed || 0) + (counts.leaky || 0) +
+    (counts.decayRot || 0) + (counts.whiteMold || 0)) > 0
+  const hasData = result.total > 0 && hasDefects
 
   const gradeColor = GRADE_COLORS[result.status] || COLORS.text3
-
-  // Guidance text based on grade and score
-  const guidance = !hasData ? 'waiting for sample'
-    : result.grade === 'excellent' && result.score >= 50 ? 'room to push speed'
-    : result.grade === 'excellent' ? 'Excellent but tight — watch it'
-    : result.grade === 'good' && result.score >= 50 ? 'solid Good — hold pace'
-    : result.grade === 'good' ? 'Good but drifting toward Fair'
-    : result.grade === 'fair' && result.score >= 30 ? 'Fair — manageable'
-    : result.grade === 'fair' ? 'Fair — close to Poor'
-    : 'Poor — slow down or divert'
 
   // Pack criteria check — separate from grade
   const pc = PACK_CRITERIA[packCriteria] || PACK_CRITERIA.standard
@@ -84,12 +81,9 @@ export default function ScoreDisplay({ counts, packCriteria, tolerances }) {
           }}>{tolerances ? 'Grade' : 'MBG Grade'}</div>
           <div style={{
             fontFamily: FONT, fontSize: 42, fontWeight: 700,
-            color: gradeColor, lineHeight: 1, marginBottom: 4,
+            color: gradeColor, lineHeight: 1,
           }}>
             {hasData ? result.label : '—'}
-          </div>
-          <div style={{ fontFamily: FONT, fontSize: 11, color: COLORS.text3 }}>
-            {guidance}
           </div>
         </div>
 

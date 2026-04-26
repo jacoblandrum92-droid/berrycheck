@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { COLORS, FONT, DEFECT_DETAIL } from '../constants'
+import { COLORS, FONT, DEFECT_DETAIL, classifyWeight, CLASS_COLORS, loadPackTolerance, savePackTolerance, DEFAULT_PACK_TOLERANCE } from '../constants'
 
 // ============================================================
 // TOGGLE DEFINITIONS — name, brief, verbose, SOP steps
@@ -77,6 +77,117 @@ const METHODS = {
       'System grades on actual percentages and shows 600g equivalent for reporting.',
     ],
   },
+  pint30: {
+    label: 'PINT (30-BERRY)',
+    brief: 'Pint clamshell + 30-berry subsample — no camera needed.',
+    verbose: 'Field sampling method when no camera is available. Weigh the clamshell for a fill check (actual vs label), then pull 30 berries, weigh them, and let the system estimate total berry count from the label weight and average berry weight. Grading is based on the labeled clamshell weight (302g pint) so results are consistent regardless of fill variance.',
+    color: '#1E40AF',
+    steps: [
+      'Pull a sealed pint clamshell from the packing line.',
+      'Place on the clamshell scale. Record gross weight — system will show net vs label as a fill check.',
+      'Open clamshell and pull 30 berries at random.',
+      'Weigh the 30-berry subsample. Record weight in grams.',
+      'Return the 30 berries to the clamshell.',
+      'Inspect every berry. Remove and sort all defects.',
+      'Record defect counts below. System grades against 302g label weight.',
+    ],
+  },
+  '18oz30': {
+    label: '18OZ (30-BERRY)',
+    brief: '18oz clamshell + 30-berry subsample — no camera needed.',
+    verbose: 'Field sampling method for 18oz clamshells when no camera is available. Weigh the clamshell for a fill check (actual vs label), then pull 30 berries, weigh them, and let the system estimate total berry count from the label weight and average berry weight. Grading is based on the labeled clamshell weight (518g) so results are consistent regardless of fill variance.',
+    color: '#EA580C',
+    steps: [
+      'Pull a sealed 18oz clamshell from the packing line.',
+      'Place on the clamshell scale. Record gross weight — system will show net vs label as a fill check.',
+      'Open clamshell and pull 30 berries at random.',
+      'Weigh the 30-berry subsample. Record weight in grams.',
+      'Return the 30 berries to the clamshell.',
+      'Inspect every berry. Remove and sort all defects.',
+      'Record defect counts below. System grades against 518g label weight.',
+    ],
+  },
+  mightyblue30: {
+    label: 'MIGHTY BLUE (30-BERRY)',
+    brief: '9.8oz Mighty Blue clamshell + 30-berry subsample — no camera needed.',
+    verbose: 'Field sampling method for 9.8oz Mighty Blue clamshells when no camera is available. Weigh the clamshell for a fill check (actual vs label), then pull 30 berries, weigh them, and let the system estimate total berry count from the label weight and average berry weight. Grading is based on the labeled clamshell weight (282g) so results are consistent regardless of fill variance.',
+    color: '#0891B2',
+    steps: [
+      'Pull a sealed 9.8oz Mighty Blue clamshell from the packing line.',
+      'Place on the clamshell scale. Record gross weight — system will show net vs label as a fill check.',
+      'Open clamshell and pull 30 berries at random.',
+      'Weigh the 30-berry subsample. Record weight in grams.',
+      'Return the 30 berries to the clamshell.',
+      'Inspect every berry. Remove and sort all defects.',
+      'Record defect counts below. System grades against 282g label weight.',
+    ],
+  },
+}
+
+// Clamshell profiles — editable defaults (built-ins)
+const CLAMSHELL_PROFILES = {
+  pint30:  { labelWeight: 302, tare: 20, unitLabel: 'Pint' },
+  '18oz30': { labelWeight: 518, tare: 30, unitLabel: '18oz' },
+  mightyblue30: { labelWeight: 282, tare: 20, unitLabel: 'Mighty Blue' },
+}
+
+// Built-in method keys in display order
+const BUILTIN_METHOD_ORDER = ['fullcount', 'pint', 'pint30', '18oz30', 'mightyblue30', '600g', 'manual']
+
+// localStorage keys for admin settings
+const LS_ENABLED = 'bc_enabled_methods'
+const LS_CUSTOM  = 'bc_custom_methods'
+
+function loadEnabledMethods() {
+  try {
+    const raw = localStorage.getItem(LS_ENABLED)
+    if (!raw) return null // null = all enabled by default
+    const arr = JSON.parse(raw)
+    return Array.isArray(arr) ? arr : null
+  } catch { return null }
+}
+
+function saveEnabledMethods(keys) {
+  try { localStorage.setItem(LS_ENABLED, JSON.stringify(keys)) } catch {}
+}
+
+function loadCustomMethods() {
+  try {
+    const raw = localStorage.getItem(LS_CUSTOM)
+    if (!raw) return []
+    const arr = JSON.parse(raw)
+    return Array.isArray(arr) ? arr : []
+  } catch { return [] }
+}
+
+function saveCustomMethods(arr) {
+  try { localStorage.setItem(LS_CUSTOM, JSON.stringify(arr)) } catch {}
+}
+
+// Build the combined METHODS map (built-ins + customs), and the combined profile map
+function buildMethodRegistry(customs) {
+  const methods = { ...METHODS }
+  const profiles = { ...CLAMSHELL_PROFILES }
+  for (const c of customs) {
+    methods[c.key] = {
+      label: c.label.toUpperCase(),
+      brief: `${c.unitLabel} + 30-berry subsample — custom pack type.`,
+      verbose: `Custom sampling type for ${c.unitLabel} clamshells. Weigh the clamshell for a fill check, pull 30 berries, weigh them, and let the system estimate total berry count from the ${c.labelWeight}g label weight.`,
+      color: c.color || '#DB2777',
+      steps: [
+        `Pull a sealed ${c.unitLabel} clamshell from the packing line.`,
+        'Place on the clamshell scale. Record gross weight.',
+        'Open clamshell and pull 30 berries at random.',
+        'Weigh the 30-berry subsample.',
+        'Return the 30 berries to the clamshell.',
+        'Inspect every berry. Remove and sort all defects.',
+        `Record defect counts below. System grades against ${c.labelWeight}g label weight.`,
+      ],
+      _custom: true,
+    }
+    profiles[c.key] = { labelWeight: c.labelWeight, tare: c.tare, unitLabel: c.unitLabel }
+  }
+  return { methods, profiles }
 }
 
 const DETAIL_MODES = {
@@ -188,7 +299,35 @@ function SOPSteps({ steps }) {
 // MAIN COMPONENT
 // ============================================================
 
-export default function CountEntry({ counts, setCounts, detailed, onToggleDetailed, sampleMethod, onToggleMethod, onSetMethod, gradingStandard, onToggleStandard, onShowGradingGuide }) {
+export default function CountEntry({ counts, setCounts, detailed, onToggleDetailed, sampleMethod, onToggleMethod, onSetMethod, gradingStandard, onToggleStandard, onShowGradingGuide, dualLineMode, onToggleDualLineMode }) {
+  // Admin: custom methods + enabled-methods filter
+  const [customMethods, setCustomMethods] = useState(loadCustomMethods)
+  const [enabledMethods, setEnabledMethodsState] = useState(loadEnabledMethods) // null = all
+  const [showMethodsAdmin, setShowMethodsAdmin] = useState(false)
+  const registry = buildMethodRegistry(customMethods)
+  const allKeys = [...BUILTIN_METHOD_ORDER, ...customMethods.map(c => c.key)]
+  const enabledKeys = enabledMethods === null ? allKeys : allKeys.filter(k => enabledMethods.includes(k))
+  const cycleKeys = enabledKeys.length > 0 ? enabledKeys : allKeys
+
+  // If the current method gets disabled, auto-switch to first enabled
+  useEffect(() => {
+    if (enabledKeys.length > 0 && !enabledKeys.includes(sampleMethod) && onSetMethod) {
+      onSetMethod(enabledKeys[0])
+    }
+  }, [enabledKeys, sampleMethod, onSetMethod])
+
+  const cycleMethod = () => {
+    if (!onSetMethod) { onToggleMethod && onToggleMethod(); return }
+    const idx = cycleKeys.indexOf(sampleMethod)
+    const next = cycleKeys[(idx + 1) % cycleKeys.length]
+    onSetMethod(next)
+  }
+
+  const saveAdmin = ({ enabled, customs }) => {
+    if (customs) { setCustomMethods(customs); saveCustomMethods(customs) }
+    if (enabled !== undefined) { setEnabledMethodsState(enabled); saveEnabledMethods(enabled) }
+  }
+
   const [thirtyBerryWeight, setThirtyBerryWeight] = useState('')
   const [manualTotal, setManualTotal] = useState('')
   const [fullcountTotal, setFullcountTotal] = useState('')
@@ -206,6 +345,9 @@ export default function CountEntry({ counts, setCounts, detailed, onToggleDetail
       setPintWeight('')
       setManualTotal('')
       setThirtyBerryWeight('')
+      setClamshellGross('')
+      setClamshellNetOverride('')
+      setClamshell30Weight('')
     }
   }, [counts.good, counts.permanent, counts.condition, counts.decay])
 
@@ -220,9 +362,35 @@ export default function CountEntry({ counts, setCounts, detailed, onToggleDetail
   const [pintWeight, setPintWeight] = useState('')
   const [pintTare, setPintTare] = useState(true) // subtract 20g clamshell weight
 
+  // 30-berry clamshell modes (pint30, 18oz30)
+  const [clamshellGross, setClamshellGross] = useState('')
+  const [clamshellNetOverride, setClamshellNetOverride] = useState('') // manual entry, overrides gross-tare
+  const [clamshell30Weight, setClamshell30Weight] = useState('')
+  const [clamshellTareOn, setClamshellTareOn] = useState(() => {
+    try { return localStorage.getItem('bc_clamshell_tare_on') === 'true' } catch { return false }
+  })
+  useEffect(() => {
+    try { localStorage.setItem('bc_clamshell_tare_on', clamshellTareOn ? 'true' : 'false') } catch {}
+  }, [clamshellTareOn])
+  const [clamshellTareAmount, setClamshellTareAmount] = useState('20')
+  const [clamshellLabelWeight, setClamshellLabelWeight] = useState('302')
+
   const isManual = sampleMethod === 'manual'
   const isFullCount = sampleMethod === 'fullcount'
   const isPint = sampleMethod === 'pint'
+  const isPint30 = sampleMethod === 'pint30'
+  const is18oz30 = sampleMethod === '18oz30'
+  const isMightyBlue30 = sampleMethod === 'mightyblue30'
+  const isClamshell30 = isPint30 || is18oz30 || isMightyBlue30 || !!(registry.profiles[sampleMethod] && sampleMethod !== 'pint' && sampleMethod !== '600g' && sampleMethod !== 'fullcount' && sampleMethod !== 'manual')
+
+  // Apply clamshell profile defaults when switching into a 30-berry mode
+  useEffect(() => {
+    if (!isClamshell30) return
+    const profile = registry.profiles[sampleMethod]
+    if (!profile) return
+    setClamshellTareAmount(String(profile.tare))
+    setClamshellLabelWeight(String(profile.labelWeight))
+  }, [sampleMethod])
 
   const toggleInfo = (key) => setExpandedInfo(prev => prev === key ? null : key)
 
@@ -248,9 +416,34 @@ export default function CountEntry({ counts, setCounts, detailed, onToggleDetail
   const pintScaleFactor = pintNetWeight > 0 ? 600 / pintNetWeight : 0
   const pint600gEquivTotal = pintScaleFactor > 0 && parseInt(fullcountTotal) ? Math.round(parseInt(fullcountTotal) * pintScaleFactor) : null
 
+  // === Clamshell 30-berry mode calculations (pint30, 18oz30) ===
+  const clamshellTareVal = parseFloat(clamshellTareAmount) || 0
+  const clamshellGrossVal = parseFloat(clamshellGross) || 0
+  const clamshellNetComputed = clamshellTareOn ? Math.max(0, clamshellGrossVal - clamshellTareVal) : clamshellGrossVal
+  const clamshellNetOverrideVal = parseFloat(clamshellNetOverride) || 0
+  // Recorded net: manual override takes precedence; else computed from gross - tare
+  const clamshellNetMeasured = clamshellNetOverrideVal > 0 ? clamshellNetOverrideVal : clamshellNetComputed
+  const clamshellLabel = parseFloat(clamshellLabelWeight) || 0
+  const clamshellFillDelta = clamshellNetMeasured > 0 && clamshellLabel > 0 ? clamshellNetMeasured - clamshellLabel : null
+  const clamshell30Val = parseFloat(clamshell30Weight) || 0
+  const clamshellAvgBerryWeight = clamshell30Val > 0 ? clamshell30Val / 30 : 0
+  // Grading uses LABEL weight, not measured — consistent grading regardless of fill
+  const clamshellEstimatedTotal = clamshellAvgBerryWeight > 0 && clamshellLabel > 0
+    ? Math.round(clamshellLabel / clamshellAvgBerryWeight) : null
+  const clamshellBerrySize = !clamshell30Val ? null
+    : clamshell30Val <= 33 ? 'Small'
+    : clamshell30Val <= 65 ? 'Medium'
+    : 'Large'
+  const clamshellBerrySizeColor = clamshellBerrySize === 'Small' ? COLORS.amber
+    : clamshellBerrySize === 'Large' ? COLORS.green
+    : clamshellBerrySize === 'Medium' ? COLORS.text
+    : COLORS.text3
+
   // === Active total — depends on mode ===
   const estimatedTotal = (isFullCount || isPint) ? (parseInt(fullcountTotal) || null)
-    : isManual ? (parseInt(manualTotal) || null) : estimatedTotal600
+    : isManual ? (parseInt(manualTotal) || null)
+    : isClamshell30 ? clamshellEstimatedTotal
+    : estimatedTotal600
 
   // Calculate total defects
   const totalDefects = detailed
@@ -282,6 +475,26 @@ export default function CountEntry({ counts, setCounts, detailed, onToggleDetail
         if (prev._sampleMethod === 'pint' && prev._fullcountTotal === t && prev._pintWeight === pw) return prev
         return { ...prev, _sampleMethod: 'pint', _fullcountTotal: t, _pintWeight: pw, _pintScaleFactor: pintScaleFactor, _pint600gEquivTotal: pint600gEquivTotal, _manualTotal: 0, _thirtyBerryWeight: 0, _packWeight: 0 }
       })
+    } else if (isClamshell30) {
+      const w30 = parseFloat(clamshell30Weight) || 0
+      const gross = parseFloat(clamshellGross) || 0
+      setCounts(prev => {
+        if (prev._sampleMethod === sampleMethod &&
+            prev._thirtyBerryWeight === w30 &&
+            prev._clamshellGross === gross &&
+            prev._clamshellLabel === clamshellLabel) return prev
+        return {
+          ...prev,
+          _sampleMethod: sampleMethod,
+          _thirtyBerryWeight: w30,
+          _clamshellGross: gross,
+          _clamshellNet: clamshellNetMeasured,
+          _clamshellLabel: clamshellLabel,
+          _clamshellTare: clamshellTareOn ? clamshellTareVal : 0,
+          _clamshellEstimatedTotal: clamshellEstimatedTotal || 0,
+          _manualTotal: 0, _fullcountTotal: 0, _packWeight: 0, _pintWeight: 0,
+        }
+      })
     } else if (isManual) {
       const t = parseInt(manualTotal) || 0
       setCounts(prev => {
@@ -295,7 +508,7 @@ export default function CountEntry({ counts, setCounts, detailed, onToggleDetail
         return { ...prev, _sampleMethod: '600g', _thirtyBerryWeight: w, _manualTotal: 0, _fullcountTotal: 0, _packWeight: 0, _pintWeight: 0 }
       })
     }
-  }, [thirtyBerryWeight, manualTotal, fullcountTotal, packWeight, pintWeight, isManual, isFullCount, isPint])
+  }, [thirtyBerryWeight, manualTotal, fullcountTotal, packWeight, pintWeight, clamshell30Weight, clamshellGross, clamshellNetOverride, clamshellLabel, clamshellTareOn, clamshellTareVal, isManual, isFullCount, isPint, isClamshell30, sampleMethod])
 
   // Auto-calculate good when total or defects change
   useEffect(() => {
@@ -312,7 +525,7 @@ export default function CountEntry({ counts, setCounts, detailed, onToggleDetail
         return { ...prev, good: newGood }
       })
     }
-  }, [(isFullCount || isPint) ? fullcountTotal : isManual ? manualTotal : thirtyBerryWeight, estimatedTotal])
+  }, [(isFullCount || isPint) ? fullcountTotal : isManual ? manualTotal : isClamshell30 ? clamshell30Weight : thirtyBerryWeight, estimatedTotal])
 
   const update = (key, val) => {
     const newVal = Math.max(0, parseInt(val) || 0)
@@ -355,7 +568,7 @@ export default function CountEntry({ counts, setCounts, detailed, onToggleDetail
     </div>
   )
 
-  const methodConfig = METHODS[sampleMethod]
+  const methodConfig = registry.methods[sampleMethod] || METHODS[sampleMethod]
   const standardConfig = STANDARDS[gradingStandard]
   const detailConfig = detailed ? DETAIL_MODES.detailed : DETAIL_MODES.quick
 
@@ -389,7 +602,7 @@ export default function CountEntry({ counts, setCounts, detailed, onToggleDetail
                 padding: '3px 6px', borderRadius: 3, cursor: 'pointer',
               }}>GUIDE</button>
             )}
-            <button onClick={onToggleMethod} style={{
+            <button onClick={cycleMethod} style={{
               fontFamily: FONT, fontSize: 9, fontWeight: 600,
               color: methodConfig.color,
               background: methodConfig.color + '15',
@@ -410,6 +623,14 @@ export default function CountEntry({ counts, setCounts, detailed, onToggleDetail
               {detailConfig.label}
             </button>
             <div style={{ flex: 1 }} />
+            <button onClick={() => setShowMethodsAdmin(true)} style={{
+              fontFamily: FONT, fontSize: 8, color: COLORS.text3,
+              background: 'transparent', border: `1px solid ${COLORS.border}`,
+              padding: '2px 6px', borderRadius: 2, cursor: 'pointer',
+              letterSpacing: '0.06em',
+            }} title="Manage sample types">
+              ADMIN
+            </button>
             <button onClick={() => { setSimpleView(false); localStorage.setItem('bc_qc_simple_view', 'false') }} style={{
               fontFamily: FONT, fontSize: 8, color: COLORS.text3,
               background: 'transparent', border: `1px solid ${COLORS.border}`,
@@ -461,7 +682,7 @@ export default function CountEntry({ counts, setCounts, detailed, onToggleDetail
                 buttonLabel={methodConfig.label}
                 buttonColor={methodConfig.color}
                 active={isFullCount || isManual}
-                onClick={onToggleMethod}
+                onClick={cycleMethod}
                 expanded={expandedInfo === 'method'}
                 onToggleExpand={() => toggleInfo('method')}
               />
@@ -477,6 +698,24 @@ export default function CountEntry({ counts, setCounts, detailed, onToggleDetail
                 expanded={expandedInfo === 'detail'}
                 onToggleExpand={() => toggleInfo('detail')}
               />
+
+              {/* Admin: manage sample types */}
+              <div style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                paddingTop: 4, borderTop: `1px dashed ${COLORS.border}`,
+              }}>
+                <div style={{
+                  fontFamily: FONT, fontSize: 9, fontWeight: 600, color: COLORS.text3,
+                  textTransform: 'uppercase', letterSpacing: '0.06em',
+                }}>Available Types</div>
+                <button onClick={() => setShowMethodsAdmin(true)} style={{
+                  fontFamily: FONT, fontSize: 9, fontWeight: 600,
+                  color: COLORS.text2, background: COLORS.bg,
+                  border: `1px solid ${COLORS.border2}`,
+                  padding: '4px 12px', borderRadius: 3, cursor: 'pointer',
+                  letterSpacing: '0.06em',
+                }}>MANAGE TYPES ({enabledKeys.length}/{allKeys.length})</button>
+              </div>
             </div>
           </>
         )}
@@ -608,6 +847,218 @@ export default function CountEntry({ counts, setCounts, detailed, onToggleDetail
                   fontFamily: FONT, fontSize: 11, color: isPint ? '#10B981' : '#2563EB', fontWeight: 600,
                 }}>
                   every berry inspected
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : isClamshell30 ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
+          {/* Clamshell weight card — prominent */}
+          <div style={{
+            background: COLORS.bg, border: `2px solid ${methodConfig.color}`,
+            borderRadius: 6, padding: '12px 14px',
+          }}>
+            {/* Header row: label + target + fill delta + compact label input */}
+            <div style={{
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              marginBottom: 8, gap: 8, flexWrap: 'wrap',
+            }}>
+              <div style={{
+                fontFamily: FONT, fontSize: 11, fontWeight: 700, color: methodConfig.color,
+                textTransform: 'uppercase', letterSpacing: '0.08em',
+              }}>{clamshellTareOn ? 'Clamshell Gross' : 'Clamshell Weight'}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                {clamshellFillDelta !== null && (
+                  <div style={{
+                    fontFamily: FONT, fontSize: 10,
+                    color: CLASS_COLORS[classifyWeight(clamshellNetMeasured, clamshellLabel, loadPackTolerance())],
+                    letterSpacing: '0.04em', fontWeight: 700,
+                  }}>
+                    {clamshellFillDelta >= 0 ? '+' : ''}{clamshellFillDelta.toFixed(1)}g
+                  </div>
+                )}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{
+                    fontFamily: FONT, fontSize: 9, color: COLORS.text3,
+                    textTransform: 'uppercase', letterSpacing: '0.06em',
+                  }}>Label Target</span>
+                  <input type="number" min="0" step="1"
+                    value={clamshellLabelWeight}
+                    onChange={e => setClamshellLabelWeight(e.target.value)}
+                    placeholder="302"
+                    style={{
+                      fontFamily: FONT, fontSize: 13, fontWeight: 700,
+                      color: methodConfig.color, background: COLORS.bg2,
+                      border: `1px solid ${methodConfig.color}40`,
+                      borderRadius: 3, padding: '3px 6px',
+                      width: 64, outline: 'none',
+                    }}
+                  />
+                  <span style={{ fontFamily: FONT, fontSize: 10, color: COLORS.text3 }}>g</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Big weight input */}
+            <div style={{
+              display: 'flex', alignItems: 'baseline', gap: 10,
+              padding: '6px 10px',
+              background: COLORS.bg2, border: `1px solid ${methodConfig.color}30`,
+              borderRadius: 4,
+            }}>
+              <input type="number" min="0" step="0.1"
+                value={clamshellGross}
+                onChange={e => setClamshellGross(e.target.value)}
+                placeholder="0"
+                style={{
+                  background: 'transparent', border: 'none', padding: 0,
+                  fontFamily: FONT, fontSize: 32, fontWeight: 800,
+                  color: clamshellGross ? COLORS.text : COLORS.text3,
+                  width: 120, outline: 'none',
+                }}
+              />
+              <span style={{
+                fontFamily: FONT, fontSize: 14, fontWeight: 600, color: COLORS.text3,
+              }}>g</span>
+              <div style={{ flex: 1 }} />
+              {/* Tare toggle — compact when OFF, details expand when ON */}
+              <button
+                onClick={() => setClamshellTareOn(prev => !prev)}
+                style={{
+                  fontFamily: FONT, fontSize: 10, fontWeight: 700,
+                  color: clamshellTareOn ? COLORS.white : COLORS.text3,
+                  background: clamshellTareOn ? methodConfig.color : COLORS.bg,
+                  border: `1px solid ${clamshellTareOn ? methodConfig.color : COLORS.border}`,
+                  padding: '5px 10px', borderRadius: 4, cursor: 'pointer',
+                  letterSpacing: '0.08em',
+                }}
+              >
+                TARE {clamshellTareOn ? 'ON' : 'OFF'}
+              </button>
+            </div>
+
+            {/* Tare details — only when ON */}
+            {clamshellTareOn && (
+              <div style={{
+                marginTop: 8, paddingTop: 8, borderTop: `1px dashed ${COLORS.border}`,
+                display: 'flex', flexDirection: 'column', gap: 6,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <span style={{
+                    fontFamily: FONT, fontSize: 9, fontWeight: 600, color: COLORS.text3,
+                    textTransform: 'uppercase', letterSpacing: '0.06em',
+                  }}>Tare amount</span>
+                  <input type="number" min="0" step="0.1"
+                    value={clamshellTareAmount}
+                    onChange={e => setClamshellTareAmount(e.target.value)}
+                    placeholder="20"
+                    style={{
+                      fontFamily: FONT, fontSize: 12, fontWeight: 700,
+                      color: COLORS.text, background: COLORS.bg,
+                      border: `1px solid ${COLORS.border}`,
+                      borderRadius: 3, padding: '3px 6px',
+                      width: 64, outline: 'none',
+                    }}
+                  />
+                  <span style={{ fontFamily: FONT, fontSize: 10, color: COLORS.text3 }}>g</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <span style={{
+                    fontFamily: FONT, fontSize: 9, fontWeight: 600, color: methodConfig.color,
+                    textTransform: 'uppercase', letterSpacing: '0.06em',
+                  }}>Net (Recorded)</span>
+                  <input type="number" min="0" step="0.1"
+                    value={clamshellNetOverride || (clamshellNetComputed > 0 ? clamshellNetComputed.toFixed(1) : '')}
+                    onChange={e => setClamshellNetOverride(e.target.value)}
+                    placeholder={clamshellNetComputed > 0 ? clamshellNetComputed.toFixed(1) : '0'}
+                    style={{
+                      fontFamily: FONT, fontSize: 14, fontWeight: 700,
+                      color: COLORS.text, background: COLORS.bg,
+                      border: `1px solid ${methodConfig.color}60`,
+                      borderRadius: 3, padding: '3px 6px',
+                      width: 80, outline: 'none',
+                    }}
+                  />
+                  <span style={{ fontFamily: FONT, fontSize: 10, color: COLORS.text3 }}>g</span>
+                  {clamshellNetOverride && (
+                    <button onClick={() => setClamshellNetOverride('')} style={{
+                      fontFamily: FONT, fontSize: 8, color: COLORS.text3,
+                      background: 'transparent', border: `1px solid ${COLORS.border}`,
+                      padding: '1px 6px', borderRadius: 2, cursor: 'pointer',
+                      letterSpacing: '0.04em',
+                    }}>USE COMPUTED</button>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 30-berry subsample weight — prominent */}
+          <div style={{
+            background: COLORS.bg, border: `2px solid ${methodConfig.color}`,
+            borderRadius: 6, padding: '12px 14px',
+          }}>
+            <div style={{
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              marginBottom: 8, gap: 8, flexWrap: 'wrap',
+            }}>
+              <div style={{
+                fontFamily: FONT, fontSize: 11, fontWeight: 700, color: methodConfig.color,
+                textTransform: 'uppercase', letterSpacing: '0.08em',
+              }}>30-Berry Subsample</div>
+              {clamshellBerrySize && (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                }}>
+                  <span style={{
+                    fontFamily: FONT, fontSize: 10, color: COLORS.text3, fontWeight: 500,
+                  }}>
+                    {clamshellAvgBerryWeight > 0 ? `${Math.round(clamshellAvgBerryWeight * 100) / 100}g avg` : ''}
+                  </span>
+                  <span style={{
+                    fontFamily: FONT, fontSize: 10, fontWeight: 700,
+                    color: clamshellBerrySizeColor, letterSpacing: '0.06em',
+                    padding: '2px 8px',
+                    background: clamshellBerrySizeColor + '18',
+                    border: `1px solid ${clamshellBerrySizeColor}40`,
+                    borderRadius: 3,
+                  }}>
+                    {clamshellBerrySize.toUpperCase()}
+                  </span>
+                </div>
+              )}
+            </div>
+            <div style={{
+              display: 'flex', alignItems: 'baseline', gap: 10,
+              padding: '6px 10px',
+              background: COLORS.bg2, border: `1px solid ${methodConfig.color}30`,
+              borderRadius: 4,
+            }}>
+              <input type="number" min="0" step="0.1"
+                value={clamshell30Weight}
+                onChange={e => setClamshell30Weight(e.target.value)}
+                placeholder="0"
+                style={{
+                  background: 'transparent', border: 'none', padding: 0,
+                  fontFamily: FONT, fontSize: 32, fontWeight: 800,
+                  color: clamshell30Weight ? COLORS.text : COLORS.text3,
+                  width: 120, outline: 'none',
+                }}
+              />
+              <span style={{
+                fontFamily: FONT, fontSize: 14, fontWeight: 600, color: COLORS.text3,
+              }}>g</span>
+              <div style={{ flex: 1 }} />
+              {clamshellEstimatedTotal && (
+                <div style={{
+                  fontFamily: FONT, fontSize: 11, fontWeight: 700, color: methodConfig.color,
+                  textAlign: 'right',
+                }}>
+                  ≈ {clamshellEstimatedTotal} berries
+                  <div style={{ fontSize: 9, fontWeight: 500, color: COLORS.text3 }}>
+                    in {clamshellLabel}g label
+                  </div>
                 </div>
               )}
             </div>
@@ -778,6 +1229,300 @@ export default function CountEntry({ counts, setCounts, detailed, onToggleDetail
           Decay detected — cannot grade Excellent
         </div>
       )}
+
+      {showMethodsAdmin && (
+        <MethodsAdmin
+          allKeys={allKeys}
+          enabledMethods={enabledMethods}
+          customMethods={customMethods}
+          registry={registry}
+          dualLineMode={dualLineMode}
+          onToggleDualLineMode={onToggleDualLineMode}
+          onSave={saveAdmin}
+          onClose={() => setShowMethodsAdmin(false)}
+        />
+      )}
+    </div>
+  )
+}
+
+// ============================================================
+// METHODS ADMIN — manage enabled types + custom pack types
+// ============================================================
+
+function MethodsAdmin({ allKeys, enabledMethods, customMethods, registry, dualLineMode, onToggleDualLineMode, onSave, onClose }) {
+  const [tolerance, setTolerance] = useState(loadPackTolerance())
+  const currentEnabled = enabledMethods === null ? allKeys : enabledMethods
+  const [enabled, setEnabled] = useState(currentEnabled)
+  const [customs, setCustoms] = useState(customMethods)
+  const [showAddForm, setShowAddForm] = useState(false)
+  const [form, setForm] = useState({ label: '', labelWeight: '', tare: '' })
+
+  const toggle = (key) => {
+    setEnabled(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key])
+  }
+
+  const addCustom = () => {
+    const label = form.label.trim()
+    const labelWeight = parseFloat(form.labelWeight) || 0
+    const tare = parseFloat(form.tare) || 0
+    if (!label || labelWeight <= 0) return
+    const key = 'custom_' + label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') + '_' + Date.now().toString(36)
+    const newCustom = { key, label, unitLabel: label, labelWeight, tare, color: '#DB2777' }
+    const next = [...customs, newCustom]
+    setCustoms(next)
+    setEnabled(prev => [...prev, key])
+    setShowAddForm(false)
+    setForm({ label: '', labelWeight: '', tare: '' })
+  }
+
+  const removeCustom = (key) => {
+    setCustoms(prev => prev.filter(c => c.key !== key))
+    setEnabled(prev => prev.filter(k => k !== key))
+  }
+
+  const save = () => {
+    onSave({ enabled, customs })
+    savePackTolerance(tolerance)
+    onClose()
+  }
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 3000,
+      background: 'rgba(0,0,0,0.5)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: 16,
+    }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background: '#fff', borderRadius: 10, padding: 20,
+        maxWidth: 480, width: '100%', maxHeight: '90vh', overflowY: 'auto',
+        border: `2px solid ${COLORS.border2}`,
+      }}>
+        <div style={{
+          fontFamily: FONT, fontSize: 14, fontWeight: 800, color: COLORS.text,
+          marginBottom: 4, letterSpacing: '0.04em',
+        }}>Manage Sample Types</div>
+        <div style={{
+          fontFamily: FONT, fontSize: 10, color: COLORS.text3, marginBottom: 14,
+        }}>Check which types the QCer can cycle through. Saves until you change it.</div>
+
+        {/* Pack weight tolerance rules — applies to all packs */}
+        <div style={{
+          padding: '10px 12px', marginBottom: 12,
+          background: COLORS.bg2, border: `1px solid ${COLORS.border2}`, borderRadius: 4,
+        }}>
+          <div style={{
+            fontFamily: FONT, fontSize: 10, fontWeight: 700, color: COLORS.text,
+            textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6,
+          }}>Weight Tolerance Rules</div>
+          <div style={{
+            fontFamily: FONT, fontSize: 10, color: COLORS.text3, lineHeight: 1.4, marginBottom: 8,
+          }}>Applies across all packs. Green = within ±X% of label. Yellow = outside green band up to Y grams overweight. Red = over Y grams overweight.</div>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <label style={{ fontFamily: FONT, fontSize: 9, color: COLORS.text3 }}>
+              Green band ±%
+              <input type="number" min="0" step="0.1" value={tolerance.greenPct}
+                onChange={e => setTolerance({ ...tolerance, greenPct: parseFloat(e.target.value) || 0 })}
+                style={{
+                  display: 'block', marginTop: 3, padding: '6px 8px', width: 80,
+                  fontFamily: FONT, fontSize: 14, fontWeight: 700, color: '#0F6E56',
+                  border: `1px solid #0F6E5660`, borderRadius: 3, outline: 'none',
+                  boxSizing: 'border-box',
+                }}
+              />
+            </label>
+            <label style={{ fontFamily: FONT, fontSize: 9, color: COLORS.text3 }}>
+              Yellow → Red threshold (g over)
+              <input type="number" min="0" step="1" value={tolerance.yellowOverG}
+                onChange={e => setTolerance({ ...tolerance, yellowOverG: parseFloat(e.target.value) || 0 })}
+                style={{
+                  display: 'block', marginTop: 3, padding: '6px 8px', width: 80,
+                  fontFamily: FONT, fontSize: 14, fontWeight: 700, color: '#A32D2D',
+                  border: `1px solid #A32D2D60`, borderRadius: 3, outline: 'none',
+                  boxSizing: 'border-box',
+                }}
+              />
+            </label>
+            <div style={{
+              flex: 1, alignSelf: 'flex-end',
+              fontFamily: FONT, fontSize: 9, color: COLORS.text3, lineHeight: 1.5,
+            }}>
+              <span style={{ color: '#0F6E56', fontWeight: 700 }}>Green</span>: within ±{tolerance.greenPct}% (pint 302g ≈ ±{(302 * tolerance.greenPct / 100).toFixed(1)}g)<br />
+              <span style={{ color: '#BA7517', fontWeight: 700 }}>Yellow</span>: outside green, over by ≤{tolerance.yellowOverG}g<br />
+              <span style={{ color: '#A32D2D', fontWeight: 700 }}>Red</span>: over label by &gt;{tolerance.yellowOverG}g
+            </div>
+          </div>
+        </div>
+
+        {/* Dual-line mode toggle */}
+        {onToggleDualLineMode && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            padding: '10px 12px', marginBottom: 14,
+            background: dualLineMode ? COLORS.green + '10' : COLORS.bg2,
+            border: `1px solid ${dualLineMode ? COLORS.green + '60' : COLORS.border}`,
+            borderRadius: 4,
+          }}>
+            <button onClick={onToggleDualLineMode} style={{
+              fontFamily: FONT, fontSize: 11, fontWeight: 700,
+              color: dualLineMode ? COLORS.white : COLORS.text3,
+              background: dualLineMode ? COLORS.green : COLORS.bg,
+              border: `1px solid ${dualLineMode ? COLORS.green : COLORS.border}`,
+              padding: '6px 14px', borderRadius: 4, cursor: 'pointer',
+              letterSpacing: '0.08em', minWidth: 78,
+            }}>
+              DUAL LINE {dualLineMode ? 'ON' : 'OFF'}
+            </button>
+            <div style={{ flex: 1 }}>
+              <div style={{
+                fontFamily: FONT, fontSize: 11, fontWeight: 700, color: COLORS.text,
+                letterSpacing: '0.04em',
+              }}>Line 1 / Line 2 parallel pallets</div>
+              <div style={{
+                fontFamily: FONT, fontSize: 9, color: COLORS.text3, lineHeight: 1.3,
+              }}>Show LINE 1 / LINE 2 switcher to work two pallets in parallel.</div>
+            </div>
+          </div>
+        )}
+
+        {/* Method list with toggles */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14 }}>
+          {allKeys.map(key => {
+            const cfg = registry.methods[key]
+            if (!cfg) return null
+            const isOn = enabled.includes(key)
+            const isCustom = !!cfg._custom
+            return (
+              <div key={key} style={{
+                display: 'flex', alignItems: 'center', gap: 10,
+                padding: '8px 10px',
+                background: isOn ? cfg.color + '10' : COLORS.bg2,
+                border: `1px solid ${isOn ? cfg.color + '60' : COLORS.border}`,
+                borderRadius: 4,
+              }}>
+                <input
+                  type="checkbox"
+                  checked={isOn}
+                  onChange={() => toggle(key)}
+                  style={{ width: 18, height: 18, cursor: 'pointer', accentColor: cfg.color }}
+                />
+                <div style={{ flex: 1 }}>
+                  <div style={{
+                    fontFamily: FONT, fontSize: 11, fontWeight: 700,
+                    color: isOn ? cfg.color : COLORS.text2, letterSpacing: '0.04em',
+                  }}>{cfg.label}</div>
+                  <div style={{
+                    fontFamily: FONT, fontSize: 9, color: COLORS.text3, lineHeight: 1.3,
+                  }}>{cfg.brief}</div>
+                </div>
+                {isCustom && (
+                  <button onClick={() => removeCustom(key)} style={{
+                    fontFamily: FONT, fontSize: 9, color: COLORS.red,
+                    background: 'transparent', border: `1px solid ${COLORS.red}40`,
+                    padding: '2px 8px', borderRadius: 2, cursor: 'pointer',
+                  }}>REMOVE</button>
+                )}
+              </div>
+            )
+          })}
+        </div>
+
+        {/* Add custom */}
+        {showAddForm ? (
+          <div style={{
+            padding: 12, marginBottom: 14,
+            background: COLORS.bg2, border: `1px solid ${COLORS.border2}`, borderRadius: 4,
+          }}>
+            <div style={{
+              fontFamily: FONT, fontSize: 10, fontWeight: 700, color: COLORS.text,
+              textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8,
+            }}>Add Custom Pack Type (30-berry clamshell)</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <label style={{ fontFamily: FONT, fontSize: 10, color: COLORS.text3 }}>
+                Name (e.g., "32oz", "2lb")
+                <input value={form.label} onChange={e => setForm({ ...form, label: e.target.value })}
+                  placeholder="32oz"
+                  style={{
+                    display: 'block', width: '100%', marginTop: 3, padding: '6px 8px',
+                    fontFamily: FONT, fontSize: 13, color: COLORS.text,
+                    border: `1px solid ${COLORS.border}`, borderRadius: 3, outline: 'none',
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <label style={{ flex: 1, fontFamily: FONT, fontSize: 10, color: COLORS.text3 }}>
+                  Label Weight (g)
+                  <input type="number" min="0" value={form.labelWeight}
+                    onChange={e => setForm({ ...form, labelWeight: e.target.value })}
+                    placeholder="907"
+                    style={{
+                      display: 'block', width: '100%', marginTop: 3, padding: '6px 8px',
+                      fontFamily: FONT, fontSize: 13, color: COLORS.text,
+                      border: `1px solid ${COLORS.border}`, borderRadius: 3, outline: 'none',
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                </label>
+                <label style={{ flex: 1, fontFamily: FONT, fontSize: 10, color: COLORS.text3 }}>
+                  Tare (g)
+                  <input type="number" min="0" value={form.tare}
+                    onChange={e => setForm({ ...form, tare: e.target.value })}
+                    placeholder="35"
+                    style={{
+                      display: 'block', width: '100%', marginTop: 3, padding: '6px 8px',
+                      fontFamily: FONT, fontSize: 13, color: COLORS.text,
+                      border: `1px solid ${COLORS.border}`, borderRadius: 3, outline: 'none',
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                </label>
+              </div>
+              <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                <button onClick={() => { setShowAddForm(false); setForm({ label: '', labelWeight: '', tare: '' }) }}
+                  style={{
+                    fontFamily: FONT, fontSize: 10, color: COLORS.text3,
+                    background: 'transparent', border: `1px solid ${COLORS.border}`,
+                    padding: '6px 12px', borderRadius: 3, cursor: 'pointer',
+                  }}>CANCEL</button>
+                <button onClick={addCustom}
+                  disabled={!form.label || !parseFloat(form.labelWeight)}
+                  style={{
+                    fontFamily: FONT, fontSize: 10, fontWeight: 700, color: '#fff',
+                    background: (!form.label || !parseFloat(form.labelWeight)) ? '#aaa' : COLORS.green,
+                    border: 'none', padding: '6px 14px', borderRadius: 3,
+                    cursor: (!form.label || !parseFloat(form.labelWeight)) ? 'not-allowed' : 'pointer',
+                    letterSpacing: '0.06em',
+                  }}>ADD</button>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <button onClick={() => setShowAddForm(true)} style={{
+            width: '100%', padding: '8px 12px', marginBottom: 14,
+            fontFamily: FONT, fontSize: 10, fontWeight: 600,
+            color: COLORS.text2, background: COLORS.bg,
+            border: `1px dashed ${COLORS.border2}`, borderRadius: 3, cursor: 'pointer',
+            letterSpacing: '0.06em',
+          }}>+ ADD CUSTOM PACK TYPE</button>
+        )}
+
+        {/* Footer */}
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button onClick={onClose} style={{
+            fontFamily: FONT, fontSize: 11, color: COLORS.text2,
+            background: 'transparent', border: `1px solid ${COLORS.border}`,
+            padding: '8px 16px', borderRadius: 4, cursor: 'pointer',
+          }}>CANCEL</button>
+          <button onClick={save} style={{
+            fontFamily: FONT, fontSize: 11, fontWeight: 700, color: '#fff',
+            background: COLORS.green, border: 'none',
+            padding: '8px 20px', borderRadius: 4, cursor: 'pointer',
+            letterSpacing: '0.06em',
+          }}>SAVE</button>
+        </div>
+      </div>
     </div>
   )
 }
