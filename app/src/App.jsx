@@ -59,6 +59,7 @@ import PrePackNotes, { PrePackBanner } from './components/PrePackNotes'
 import CameraTuner from './components/CameraTuner'
 import ZoneConfirm from './components/ZoneConfirm'
 import PalletTagAssign from './components/PalletTagAssign'
+import QCerWizard from './components/QCerWizard'
 
 export default function App() {
   const mode = new URLSearchParams(window.location.search).get('mode')
@@ -207,6 +208,15 @@ function Dashboard() {
   useEffect(() => {
     try { localStorage.setItem('bc_pallet_layers_compact', palletLayersCompact ? 'true' : 'false') } catch {}
   }, [palletLayersCompact])
+  // QCer Mode — guided wizard layered over the existing data model. Default OFF
+  // (this is still experimental). Toggle from Header MENU → Settings.
+  const [qcerMode, setQcerMode] = useState(() => {
+    try { return localStorage.getItem('bc_qcer_mode') === 'true' } catch { return false }
+  })
+  useEffect(() => {
+    try { localStorage.setItem('bc_qcer_mode', qcerMode ? 'true' : 'false') } catch {}
+  }, [qcerMode])
+  const toggleQcerMode = () => setQcerMode(v => !v)
   const [detailedCounts, setDetailedCounts] = useState(true)
   const [sampleMethod, setSampleMethod] = useState('fullcount') // 'fullcount', '600g', or 'manual'
   const [gradingStandard, setGradingStandard] = useState('mbg') // 'mbg' or 'butterfly'
@@ -856,6 +866,8 @@ function Dashboard() {
         features={features}
         trainingMode={trainingMode}
         onToggleTraining={toggleTraining}
+        qcerMode={qcerMode}
+        onToggleQcerMode={toggleQcerMode}
         relayConnected={connected}
         phonesOnline={phonesOnline}
         graderConnected={graderConnected}
@@ -1913,6 +1925,10 @@ function Dashboard() {
           />
         )
       )}
+
+      {/* QCer Mode wizard — full-screen takeover when enabled. State hooks above
+          continue to run, so toggling off restores the dashboard with no data loss. */}
+      {qcerMode && <QCerWizard onExit={toggleQcerMode} />}
 
     </div>
   )

@@ -5,6 +5,7 @@ import { COLORS, FONT } from '../constants'
 export default function Header({
   onOpenCamera, onResetZones, onShowAccuracy, onShowLogs, onShowReceipts, onShowPackLog, onShowPackCodes, onShowBackupForm, onShowPackout, onShowDCReconcile, onShowPrePack, onShowFeatures, features = {},
   trainingMode, onToggleTraining,
+  qcerMode, onToggleQcerMode,
   relayConnected, phonesOnline,
   graderConnected,
   scaleConnected, scaleWeight, scalePort, onScaleTare,
@@ -205,6 +206,13 @@ export default function Header({
 
               {/* Settings */}
               <MenuSection label="Settings" last>
+                {onToggleQcerMode && (
+                  <MenuItem
+                    label={`QCer Mode ${qcerMode ? 'ON' : 'OFF'}`}
+                    color={qcerMode ? COLORS.green : COLORS.text3}
+                    onClick={() => menuAction(onToggleQcerMode)}
+                  />
+                )}
                 {features.training !== false && (
                   <MenuItem
                     label={`Training ${trainingMode ? 'ON' : 'OFF'}`}
