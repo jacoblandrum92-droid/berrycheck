@@ -228,6 +228,62 @@ The grader's value proposition is under active investigation:
 7. **Photos are proof.** Timestamps + photos = evidence. This is the product's
    core differentiator over a clipboard.
 
+8. **QC-first.** BerryCheck is a QC sampling and archiving system before anything
+   else. Ops, Pack Plans, Compliance Logs, and other tabs are secondary and have
+   not earned their place. Don't bloat the QC flow to support unused features.
+   See `project_berrycheck_qc_first.md` in Claude memory for the vision shift
+   recorded on 2026-04-25.
+
+9. **Discoverable, not disclosed.** A non-technical QCer should see only the
+   controls relevant to the task they're doing. The dashboard should be a
+   *guided flow* — pallet setup → layer pick → sample type pick → sample-specific
+   UI — not a kitchen-sink of every feature at once. See "QCer Mode" below.
+
+---
+
+## QCer Mode (Guided Workflow) — Phase 6 (planned, not built)
+
+The current dashboard is "kitchen-sink" — all controls visible at once. That works
+for Jacob (owner-operator who knows every feature) but fails the non-technical
+QCer who needs to be told what to do next.
+
+QCer Mode is a guided wizard layered over the existing data model:
+
+```
+Step 1 — Pallet Setup
+  Daily Pallet # · Pallet Tag · Pack Code   (line slot context preserved)
+  [ Continue → ]
+
+Step 2 — Pick Layer
+  ◯ #1 BOTTOM   ◯ #2 MIDDLE   ◯ #3 TOP   (skipped layers shown as such)
+  [ Continue → ]
+
+Step 3 — Pick Sample Type
+  [ QUALITY SAMPLE ]   [ BOX WEIGHT ]
+  (only the chosen flow's UI shows next)
+
+Step 4a — Quality Sample
+  Camera or 30-berry input · Defect entry · Grade · Save
+
+Step 4b — Box Weight
+  Clamshell weights · Tolerance · Save
+
+After save → Step 2 (next layer on this pallet) or Step 1 (new pallet).
+```
+
+**Design rules for Phase 6:**
+- Implement as a `qcerMode` boolean toggle (persisted). When OFF, current
+  full dashboard shows (Jacob's daily driver). When ON, render the wizard.
+- Wizard reuses existing components (CountEntry, BoxWeightEntry, PalletLayers).
+  Do not fork the data model — only wrap the UI in a step machine.
+- Manager features (LOGS, ASSIGN TAG, OPS) reachable via a "MANAGER" pop-out
+  that doesn't leave QCer mode.
+- Skip-back must preserve in-progress data. The QCer should never lose work
+  by hitting "back."
+
+This is foundational and risky to do hastily. Plan it slice-by-slice with the
+review skill before each merge.
+
 ---
 
 ## Architecture
