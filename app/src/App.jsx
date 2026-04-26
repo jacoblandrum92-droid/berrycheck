@@ -60,6 +60,7 @@ import CameraTuner from './components/CameraTuner'
 import ZoneConfirm from './components/ZoneConfirm'
 import PalletTagAssign from './components/PalletTagAssign'
 import QCerWizard from './components/QCerWizard'
+import PalletLoadTracker from './components/PalletLoadTracker'
 
 export default function App() {
   const mode = new URLSearchParams(window.location.search).get('mode')
@@ -67,6 +68,7 @@ export default function App() {
   if (mode === 'dump') return <DumpScanner />
   if (mode === 'view') return <Viewer />
   if (mode === 'daily') return <DailyView />
+  if (mode === 'load') return <PalletLoadTracker />
   return <Dashboard />
 }
 
