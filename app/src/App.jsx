@@ -61,6 +61,7 @@ import ZoneConfirm from './components/ZoneConfirm'
 import PalletTagAssign from './components/PalletTagAssign'
 import QCerWizard from './components/QCerWizard'
 import PalletLoadTracker from './components/PalletLoadTracker'
+import InventoryTally from './components/InventoryTally'
 
 export default function App() {
   const mode = new URLSearchParams(window.location.search).get('mode')
@@ -69,6 +70,7 @@ export default function App() {
   if (mode === 'view') return <Viewer />
   if (mode === 'daily') return <DailyView />
   if (mode === 'load') return <PalletLoadTracker />
+  if (mode === 'inv') return <InventoryTally />
   return <Dashboard />
 }
 
