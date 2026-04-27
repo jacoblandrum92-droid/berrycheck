@@ -41,7 +41,7 @@ function saveSession(s) {
   try { localStorage.setItem(STORE_KEY, JSON.stringify(s)) } catch {}
 }
 
-export default function InventoryTally() {
+export default function InventoryTally({ onBack }) {
   const [session, setSession] = useState(() => loadSession())
   const [adding, setAdding] = useState(false)
   const [editingId, setEditingId] = useState(null)
@@ -57,17 +57,14 @@ export default function InventoryTally() {
     setAdding(false)
   }
 
-  const increment = (id) => {
+  const incrementBy = (id, by) => {
     setSession(prev => ({
-      products: prev.products.map(p => p.id === id ? { ...p, count: p.count + 1 } : p),
+      products: prev.products.map(p => p.id === id ? { ...p, count: Math.max(0, p.count + by) } : p),
     }))
   }
-
-  const decrement = (id) => {
-    setSession(prev => ({
-      products: prev.products.map(p => p.id === id ? { ...p, count: Math.max(0, p.count - 1) } : p),
-    }))
-  }
+  const increment = (id) => incrementBy(id, 1)
+  const incrementTen = (id) => incrementBy(id, 10)
+  const decrement = (id) => incrementBy(id, -1)
 
   const setCount = (id, count) => {
     setSession(prev => ({
@@ -120,6 +117,16 @@ export default function InventoryTally() {
         padding: '12px 16px',
         display: 'flex', alignItems: 'center', gap: 12,
       }}>
+        {onBack && (
+          <button onClick={onBack} style={{
+            fontFamily: F, fontSize: 10, fontWeight: 700,
+            color: C.textDim, background: 'transparent',
+            border: `1px solid ${C.border}`,
+            padding: '4px 10px', borderRadius: 4, cursor: 'pointer',
+            letterSpacing: '0.06em', minHeight: 32,
+            touchAction: 'manipulation',
+          }}>← TOOLS</button>
+        )}
         <div>
           <div style={{ fontSize: 11, fontWeight: 700, color: C.textDim, letterSpacing: '0.12em', textTransform: 'uppercase' }}>Inventory</div>
           <div style={{ fontSize: 18, fontWeight: 800, color: C.text, lineHeight: 1.1 }}>
@@ -184,6 +191,7 @@ export default function InventoryTally() {
               key={p.id}
               product={p}
               onTap={() => increment(p.id)}
+              onAddTen={() => incrementTen(p.id)}
               onDecrement={() => decrement(p.id)}
               onEdit={() => setEditingId(p.id)}
             />
@@ -204,7 +212,7 @@ export default function InventoryTally() {
 // ============================================================
 // Product row — tap anywhere = +1
 // ============================================================
-function ProductRow({ product, onTap, onDecrement, onEdit }) {
+function ProductRow({ product, onTap, onAddTen, onDecrement, onEdit }) {
   const stop = (e) => { e.stopPropagation() }
   return (
     <div
@@ -249,8 +257,13 @@ function ProductRow({ product, onTap, onDecrement, onEdit }) {
 
       {/* Action buttons (don't bubble tap) */}
       <div onClick={stop} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <button onClick={onDecrement} style={miniBtn(C.red)}>−</button>
-        <button onClick={onEdit} style={miniBtn(C.textDim)}>✎</button>
+        <button onClick={onAddTen} title="+10" style={{
+          ...miniBtn(C.green),
+          width: 38, fontSize: 11, fontWeight: 800,
+          background: C.green, color: '#fff', borderColor: C.green,
+        }}>+10</button>
+        <button onClick={onDecrement} title="−1" style={{ ...miniBtn(C.red), width: 38 }}>−</button>
+        <button onClick={onEdit} title="edit" style={{ ...miniBtn(C.textDim), width: 38 }}>✎</button>
       </div>
     </div>
   )

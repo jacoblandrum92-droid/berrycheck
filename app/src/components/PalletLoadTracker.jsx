@@ -43,7 +43,7 @@ function saveSession(s) {
   } catch {}
 }
 
-export default function PalletLoadTracker() {
+export default function PalletLoadTracker({ onBack }) {
   const [session, setSession] = useState(() => loadSession())
   // session shape: { range: { from, to }, pallets: number[], loaded: { [num]: true } }
 
@@ -51,20 +51,20 @@ export default function PalletLoadTracker() {
   useEffect(() => { saveSession(session) }, [session])
 
   if (!session) {
-    return <SetupView onStart={(from, to) => {
+    return <SetupView onBack={onBack} onStart={(from, to) => {
       const pallets = []
       for (let n = Math.min(from, to); n <= Math.max(from, to); n++) pallets.push(n)
       setSession({ pallets, loaded: {} })
     }} />
   }
 
-  return <TrackerView session={session} setSession={setSession} />
+  return <TrackerView session={session} setSession={setSession} onBack={onBack} />
 }
 
 // ============================================================
 // SETUP — enter the range
 // ============================================================
-function SetupView({ onStart }) {
+function SetupView({ onStart, onBack }) {
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const fromN = parseInt(from)
@@ -80,6 +80,16 @@ function SetupView({ onStart }) {
       padding: '32px 20px',
     }}>
       <div style={{ width: 'min(420px, 100%)', display: 'flex', flexDirection: 'column', gap: 24 }}>
+        {onBack && (
+          <button onClick={onBack} style={{
+            alignSelf: 'flex-start',
+            fontFamily: F, fontSize: 11, fontWeight: 700,
+            color: C.textDim, background: 'transparent',
+            border: `1px solid ${C.border}`,
+            padding: '6px 12px', borderRadius: 6, cursor: 'pointer',
+            letterSpacing: '0.06em',
+          }}>← TOOLS</button>
+        )}
         <div>
           <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 6 }}>Pallet Load Tracker</div>
           <div style={{ fontSize: 13, color: C.textDim, lineHeight: 1.5 }}>
@@ -145,7 +155,7 @@ function NumberField({ label, value, onChange, autoFocus }) {
 // ============================================================
 // TRACKER — grid of pallet buttons + add-one + done
 // ============================================================
-function TrackerView({ session, setSession }) {
+function TrackerView({ session, setSession, onBack }) {
   const [showSummary, setShowSummary] = useState(false)
   const [adding, setAdding] = useState(false)
   const [addValue, setAddValue] = useState('')
@@ -192,6 +202,9 @@ function TrackerView({ session, setSession }) {
         padding: '14px 16px',
         display: 'flex', alignItems: 'center', gap: 12,
       }}>
+        {onBack && (
+          <button onClick={onBack} style={smallBtn(C.textDim)}>← TOOLS</button>
+        )}
         <div>
           <div style={{ fontSize: 11, color: C.textDim, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Loaded</div>
           <div style={{ fontSize: 22, fontWeight: 800, color: C.green, lineHeight: 1 }}>

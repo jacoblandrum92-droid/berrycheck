@@ -62,6 +62,7 @@ import PalletTagAssign from './components/PalletTagAssign'
 import QCerWizard from './components/QCerWizard'
 import PalletLoadTracker from './components/PalletLoadTracker'
 import InventoryTally from './components/InventoryTally'
+import ShedTools from './components/ShedTools'
 
 export default function App() {
   const mode = new URLSearchParams(window.location.search).get('mode')
@@ -71,6 +72,7 @@ export default function App() {
   if (mode === 'daily') return <DailyView />
   if (mode === 'load') return <PalletLoadTracker />
   if (mode === 'inv') return <InventoryTally />
+  if (mode === 'tools') return <ShedTools />
   return <Dashboard />
 }
 
