@@ -63,7 +63,6 @@ export default function InventoryTally({ onBack }) {
     }))
   }
   const increment = (id) => incrementBy(id, 1)
-  const incrementTen = (id) => incrementBy(id, 10)
   const decrement = (id) => incrementBy(id, -1)
 
   const setCount = (id, count) => {
@@ -191,7 +190,7 @@ export default function InventoryTally({ onBack }) {
               key={p.id}
               product={p}
               onTap={() => increment(p.id)}
-              onAddTen={() => incrementTen(p.id)}
+              onAdd={(n) => incrementBy(p.id, n)}
               onDecrement={() => decrement(p.id)}
               onEdit={() => setEditingId(p.id)}
             />
@@ -212,8 +211,13 @@ export default function InventoryTally({ onBack }) {
 // ============================================================
 // Product row — tap anywhere = +1
 // ============================================================
-function ProductRow({ product, onTap, onAddTen, onDecrement, onEdit }) {
+function ProductRow({ product, onTap, onAdd, onDecrement, onEdit }) {
   const stop = (e) => { e.stopPropagation() }
+  const quantityBtn = (n) => ({
+    ...miniBtn(C.green),
+    width: 44, fontSize: 11, fontWeight: 800,
+    background: C.green, color: '#fff', borderColor: C.green,
+  })
   return (
     <div
       onClick={onTap}
@@ -255,15 +259,14 @@ function ProductRow({ product, onTap, onAddTen, onDecrement, onEdit }) {
         lineHeight: 1,
       }}>+</div>
 
-      {/* Action buttons (don't bubble tap) */}
-      <div onClick={stop} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <button onClick={onAddTen} title="+10" style={{
-          ...miniBtn(C.green),
-          width: 38, fontSize: 11, fontWeight: 800,
-          background: C.green, color: '#fff', borderColor: C.green,
-        }}>+10</button>
-        <button onClick={onDecrement} title="−1" style={{ ...miniBtn(C.red), width: 38 }}>−</button>
-        <button onClick={onEdit} title="edit" style={{ ...miniBtn(C.textDim), width: 38 }}>✎</button>
+      {/* Action buttons — 2×2 grid (don't bubble row tap) */}
+      <div onClick={stop} style={{
+        display: 'grid', gridTemplateColumns: 'repeat(2, 44px)', gap: 4,
+      }}>
+        <button onClick={() => onAdd(24)} title="+24" style={quantityBtn(24)}>+24</button>
+        <button onClick={() => onAdd(28)} title="+28" style={quantityBtn(28)}>+28</button>
+        <button onClick={onDecrement} title="−1" style={{ ...miniBtn(C.red), width: 44 }}>−</button>
+        <button onClick={onEdit} title="edit" style={{ ...miniBtn(C.textDim), width: 44 }}>✎</button>
       </div>
     </div>
   )
