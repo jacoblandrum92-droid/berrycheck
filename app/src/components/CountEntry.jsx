@@ -474,9 +474,11 @@ export default function CountEntry({ counts, setCounts, detailed, onToggleDetail
   const clamshellFillDelta = clamshellNetMeasured > 0 && clamshellLabel > 0 ? clamshellNetMeasured - clamshellLabel : null
   const clamshell30Val = parseFloat(clamshell30Weight) || 0
   const clamshellAvgBerryWeight = clamshell30Val > 0 ? clamshell30Val / 30 : 0
-  // Grading uses LABEL weight, not measured — consistent grading regardless of fill
-  const clamshellEstimatedTotal = clamshellAvgBerryWeight > 0 && clamshellLabel > 0
-    ? Math.round(clamshellLabel / clamshellAvgBerryWeight) : null
+  // Grading uses MEASURED clamshell weight when entered (the actual pack the
+  // customer opens), falls back to label target if measured weight isn't available.
+  const clamshellGradingWeight = clamshellNetMeasured > 0 ? clamshellNetMeasured : clamshellLabel
+  const clamshellEstimatedTotal = clamshellAvgBerryWeight > 0 && clamshellGradingWeight > 0
+    ? Math.round(clamshellGradingWeight / clamshellAvgBerryWeight) : null
   const clamshellBerrySize = !clamshell30Val ? null
     : clamshell30Val <= 33 ? 'Small'
     : clamshell30Val <= 65 ? 'Medium'
@@ -604,9 +606,12 @@ export default function CountEntry({ counts, setCounts, detailed, onToggleDetail
 
   const headroomMap = useMemo(() => {
     if (!detailed) return null
+    // Bars are nonsense when the denominator is small (e.g. 30-berry weight not
+    // entered yet) — every defect skips tiers because each berry = several %.
+    if (!estimatedTotal || estimatedTotal < 50) return null
     const tol = (GRADING_STANDARDS[gradingStandard] || GRADING_STANDARDS.mbg).tolerances
     return defectsToNextDrop(counts, tol)
-  }, [detailed, counts, gradingStandard])
+  }, [detailed, counts, gradingStandard, estimatedTotal])
 
   const inputBox = (key, label, color, borderColor) => {
     const drops = headroomMap?.perDefect?.[key]
