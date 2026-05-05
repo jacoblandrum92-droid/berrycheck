@@ -424,6 +424,58 @@ function round1(n) {
 }
 
 // ============================================================
+// PER-DEFECT GRADE HEADROOM
+// ============================================================
+//
+// For each individual defect type, compute how many MORE berries of that
+// defect would push the sample down each successive grade tier.
+// Example: { stems: [{toGrade: 'good', plus: 2}, {toGrade: 'fair', plus: 5},
+//                    {toGrade: 'poor', plus: 11}], ... }
+//
+// Brute-force simulation per defect: re-grade with +1, +2, ... berries added
+// to that one defect until grade drops or we hit POOR. Cheap (<10ms typical).
+
+const DETAILED_DEFECT_KEYS = [
+  'stems', 'greenRed', 'scars',
+  'shrivel', 'bruise', 'soft', 'crushed', 'leaky',
+  'decayRot', 'whiteMold',
+]
+
+export function defectsToNextDrop(counts, tolerances, maxAdd = 300) {
+  const empty = {}
+  DETAILED_DEFECT_KEYS.forEach(k => { empty[k] = [] })
+
+  const current = gradeSample(counts, tolerances)
+  if (current.grade === 'none' || current.grade === 'poor') {
+    return { currentGrade: current.grade, perDefect: empty }
+  }
+
+  // Strip lean-mode aggregates so per-key additions actually count
+  const base = { ...counts }
+  delete base.permanent
+  delete base.condition
+  delete base.decay
+
+  const perDefect = {}
+  for (const key of DETAILED_DEFECT_KEYS) {
+    const drops = []
+    let lastRank = GRADE_RANK[current.grade]
+    for (let add = 1; add <= maxAdd; add++) {
+      const trial = { ...base, [key]: (base[key] || 0) + add }
+      const r = gradeSample(trial, tolerances)
+      const rank = GRADE_RANK[r.grade]
+      if (rank < lastRank) {
+        drops.push({ toGrade: r.grade, plus: add })
+        lastRank = rank
+        if (r.grade === 'poor') break
+      }
+    }
+    perDefect[key] = drops
+  }
+  return { currentGrade: current.grade, perDefect }
+}
+
+// ============================================================
 // PACK WEIGHT TOLERANCE — color rules for clamshell fill/box weights
 // ============================================================
 //

@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react'
-import { COLORS, FONT, DEFECT_DETAIL, classifyWeight, CLASS_COLORS, loadPackTolerance, savePackTolerance, DEFAULT_PACK_TOLERANCE } from '../constants'
+import React, { useState, useEffect, useMemo } from 'react'
+import { COLORS, FONT, DEFECT_DETAIL, classifyWeight, CLASS_COLORS, loadPackTolerance, savePackTolerance, DEFAULT_PACK_TOLERANCE, GRADING_STANDARDS, defectsToNextDrop } from '../constants'
+import DefectHeadroomBar from './DefectHeadroomBar'
 
 // ============================================================
 // TOGGLE DEFINITIONS — name, brief, verbose, SOP steps
@@ -601,29 +602,39 @@ export default function CountEntry({ counts, setCounts, detailed, onToggleDetail
     })
   }
 
-  const inputBox = (key, label, color, borderColor) => (
-    <div key={key} style={{
-      background: COLORS.bg2,
-      border: `1px solid ${borderColor || COLORS.border}`,
-      borderRadius: 4, padding: '8px 10px',
-    }}>
-      <div style={{
-        fontFamily: FONT, fontSize: 9, color: COLORS.text3,
-        textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3,
+  const headroomMap = useMemo(() => {
+    if (!detailed) return null
+    const tol = (GRADING_STANDARDS[gradingStandard] || GRADING_STANDARDS.mbg).tolerances
+    return defectsToNextDrop(counts, tol)
+  }, [detailed, counts, gradingStandard])
+
+  const inputBox = (key, label, color, borderColor) => {
+    const drops = headroomMap?.perDefect?.[key]
+    return (
+      <div key={key} style={{
+        background: COLORS.bg2,
+        border: `1px solid ${borderColor || COLORS.border}`,
+        borderRadius: 4, padding: '8px 10px',
       }}>
-        {label}
+        <div style={{
+          fontFamily: FONT, fontSize: 9, color: COLORS.text3,
+          textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3,
+        }}>
+          {label}
+        </div>
+        <input type="number" min="0" value={counts[key] || ''}
+          onChange={e => update(key, e.target.value)} placeholder="0"
+          style={{
+            background: 'transparent', border: 'none', padding: 0,
+            fontFamily: FONT, fontSize: 20, fontWeight: 600,
+            color: (counts[key] || 0) > 0 ? color : COLORS.text3,
+            width: '100%', outline: 'none',
+          }}
+        />
+        {detailed && drops && drops.length > 0 && <DefectHeadroomBar drops={drops} />}
       </div>
-      <input type="number" min="0" value={counts[key] || ''}
-        onChange={e => update(key, e.target.value)} placeholder="0"
-        style={{
-          background: 'transparent', border: 'none', padding: 0,
-          fontFamily: FONT, fontSize: 20, fontWeight: 600,
-          color: (counts[key] || 0) > 0 ? color : COLORS.text3,
-          width: '100%', outline: 'none',
-        }}
-      />
-    </div>
-  )
+    )
+  }
 
   const methodConfig = registry.methods[sampleMethod] || METHODS[sampleMethod]
   const standardConfig = STANDARDS[gradingStandard]
